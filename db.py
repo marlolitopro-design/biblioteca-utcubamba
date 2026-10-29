@@ -34,8 +34,19 @@ def clean_sql_for_sqlite(sql):
     return sql
 
 # ==========================================
-# GESTOR DE FILAS Y CURSORES COMPATIBLES
+# CONVERSOR AUTOMÁTICO DE FECHAS A DATETIME
 # ==========================================
+def parse_date_if_str(val):
+    if isinstance(val, str) and len(val) >= 10:
+        if val[4] == '-' and val[7] == '-' and val[:4].isdigit() and val[5:7].isdigit() and val[8:10].isdigit():
+            val_clean = val[:19]
+            for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d'):
+                try:
+                    return datetime.strptime(val_clean, fmt)
+                except ValueError:
+                    pass
+    return val
+
 def normalize_key(k):
     return k.lower().replace('_', '') if isinstance(k, str) else k
 
@@ -43,9 +54,10 @@ class UniversalRow(dict):
     def __init__(self, cursor, row):
         super().__init__()
         self._keys = [col[0] for col in cursor.description]
-        self._row = row
+        # Convierte cadenas de fecha a objetos datetime reales para soportar .strftime()
+        self._row = [parse_date_if_str(val) for val in row]
         for idx, col in enumerate(self._keys):
-            val = row[idx]
+            val = self._row[idx]
             self[col] = val
             self[normalize_key(col)] = val
 
@@ -229,7 +241,7 @@ def seed_cloud_database(conn):
             (4, 'Contabilidad', 'CONT')
         ])
 
-    # Usuarios (Admin y Estudiantes)
+    # Usuarios
     cur.execute("SELECT COUNT(*) FROM Usuarios WHERE dni = 'admin'")
     if cur.fetchone()[0] == 0:
         cur.executemany("INSERT INTO Usuarios (dni, nombres, apellidos, password_hash, rol, carrera_id, ciclo, estado) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [
@@ -291,7 +303,6 @@ def seed_cloud_database(conn):
 # CONEXIÓN PRINCIPAL
 # ==========================================
 def get_db_connection():
-    # 1. En Windows local: usa SQL Server EQUIPO
     if sys.platform.startswith('win'):
         try:
             import pyodbc
@@ -305,7 +316,6 @@ def get_db_connection():
         except Exception:
             pass
 
-    # 2. En Render (Linux en la nube): SQLite con soporte total
     conn = sqlite3.connect(DB_SQLITE_PATH, check_same_thread=False)
     conn.row_factory = UniversalRow
     conn.create_function("GETDATE", 0, lambda: datetime.now().strftime('%Y-%m-%d %H:%M:%S'))

@@ -719,8 +719,11 @@ def eliminar_alumno(usuario_id):
 # -------------------------------------------------------------
 # GESTIÓN DE LIBROS E INVENTARIO (Títulos, Copias, Estantes y Reparación)
 # -------------------------------------------------------------
-@app.route('/admin/libros')
+@app.route('/admin/libros', methods=['GET', 'POST'])
 def listar_libros():
+    if request.method == 'POST':
+        return crear_libro()
+
     if not session.get('usuario') or session['usuario']['rol'] != 'ADMIN':
         flash('Acceso restringido para el administrador.', 'warning')
         return redirect(url_for('login'))

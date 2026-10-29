@@ -1,0 +1,56 @@
+{% extends 'base.html' %}
+
+{% block title %}Mi Perfil — Biblioteca IESTP Utcubamba{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6 col-lg-5">
+        <div class="card card-custom bg-white p-4 mb-4">
+            <div class="text-center mb-4">
+                <div class="d-inline-block bg-primary bg-opacity-10 text-primary p-3 rounded-circle mb-2">
+                    <i class="bi bi-person-vcard fs-1"></i>
+                </div>
+                <h4 class="fw-bold text-dark mb-0">{{ alumno.nombres }} {{ alumno.apellidos }}</h4>
+                <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle mt-1">
+                    {{ alumno.carrera_nombre }} • Ciclo {{ alumno.ciclo }}
+                </span>
+            </div>
+
+            <div class="list-group list-group-flush small mb-4">
+                <div class="list-group-item d-flex justify-content-between px-0 py-2">
+                    <span class="text-muted">Documento (DNI):</span>
+                    <strong class="text-dark">{{ alumno.dni }}</strong>
+                </div>
+                <div class="list-group-item d-flex justify-content-between px-0 py-2">
+                    <span class="text-muted">Rol en el Sistema:</span>
+                    <span class="badge bg-secondary">{{ alumno.rol }}</span>
+                </div>
+                <div class="list-group-item d-flex justify-content-between px-0 py-2">
+                    <span class="text-muted">Condición de Matrícula:</span>
+                    <span class="badge bg-success">ACTIVO</span>
+                </div>
+            </div>
+
+            <!-- Formulario para Cambiar Contraseña -->
+            <h6 class="fw-bold text-dark mb-3"><i class="bi bi-shield-lock me-2 text-primary"></i>Cambiar Contraseña de Acceso</h6>
+            <form method="POST" action="/alumno/perfil">
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold text-secondary">Contraseña Actual</label>
+                    <input type="password" name="password_actual" class="form-control" placeholder="••••••••" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold text-secondary">Nueva Contraseña</label>
+                    <input type="password" name="password_nueva" class="form-control" placeholder="Mínimo 6 caracteres" minlength="6" required>
+                </div>
+                <div class="mb-4">
+                    <label class="form-label small fw-semibold text-secondary">Confirmar Nueva Contraseña</label>
+                    <input type="password" name="password_confirmar" class="form-control" placeholder="Repite la contraseña" minlength="6" required>
+                </div>
+                <button type="submit" class="btn btn-primary w-100 fw-semibold py-2">
+                    <i class="bi bi-check2-circle me-1"></i> Actualizar mi Contraseña
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

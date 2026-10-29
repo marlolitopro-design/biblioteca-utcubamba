@@ -1,0 +1,169 @@
+{% extends 'base.html' %}
+
+{% block title %}Mis Préstamos y Carnet — IESTP Utcubamba{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+    <!-- Columna Izquierda: Carnet Digital Institucional -->
+    <div class="col-lg-5">
+        <h4 class="fw-bold text-dark mb-3"><i class="bi bi-person-badge me-2 text-primary"></i>Carnet Digital</h4>
+        
+        <div class="carnet-box mb-3">
+            <div class="d-flex justify-content-between align-items-center border-bottom border-white border-opacity-25 pb-2 mb-3">
+                <div class="d-flex align-items-center gap-2">
+                    <i class="bi bi-book-half fs-2 text-info"></i>
+                    <div>
+                        <span class="fw-bold d-block leading-none" style="font-size: 0.95rem;">IESTP UTCUBAMBA</span>
+                        <small class="text-white-50" style="font-size: 0.72rem;">Biblioteca Central • Credencial Digital</small>
+                    </div>
+                </div>
+                <span class="badge bg-success-subtle text-success border border-success-subtle px-2 py-1">
+                    {{ alumno.estado }}
+                </span>
+            </div>
+
+            <div class="mb-3">
+                <span class="text-white-50 small d-block" style="font-size: 0.75rem;">ESTUDIANTE</span>
+                <h4 class="fw-bold mb-1 text-white">{{ alumno.nombres }} {{ alumno.apellidos }}</h4>
+                <span class="text-white-50 small d-block" style="font-size: 0.75rem;">PROGRAMA DE ESTUDIOS</span>
+                <strong class="d-block text-info">{{ alumno.carrera_nombre }}</strong>
+                <span class="badge bg-white bg-opacity-25 mt-1">Ciclo {{ alumno.ciclo }}</span>
+            </div>
+
+            <div class="bg-white bg-opacity-10 border border-white border-opacity-25 rounded-3 p-3 text-center my-3">
+                <small class="text-white-50 d-block text-uppercase fw-semibold" style="font-size: 0.72rem; letter-spacing: 1px;">Documento Nacional de Identidad</small>
+                <span class="fs-2 fw-bold text-white font-monospace d-block my-1" style="letter-spacing: 3px;">
+                    {{ alumno.dni }}
+                </span>
+                <small class="text-info" style="font-size: 0.75rem;"><i class="bi bi-eye me-1"></i>Muestra este número o entrega tu carnet en mostrador</small>
+            </div>
+
+            <div class="border-top border-white border-opacity-25 pt-2 d-flex justify-content-between align-items-center small text-white-50" style="font-size: 0.75rem;">
+                <span>Libros en poder: <strong>{{ prestamos_activos|length }} de 2</strong></span>
+                <span>Semestre: <strong>2026-I</strong></span>
+            </div>
+        </div>
+
+        <div class="alert alert-light border small text-muted">
+            <i class="bi bi-info-circle me-1 text-primary"></i> 
+            Recuerda que al solicitar un libro físico, tu carnet físico quedará en custodia en el mostrador hasta que realices la devolución.
+        </div>
+    </div>
+
+    <!-- Columna Derecha: Libros Físicos, Devoluciones y Lecturas Digitales -->
+    <div class="col-lg-7">
+        <h4 class="fw-bold text-dark mb-3"><i class="bi bi-journal-bookmark me-2 text-primary"></i>Libros Físicos en tu Poder</h4>
+
+        {% if prestamos_activos %}
+            <div class="row g-3 mb-4">
+                {% for p in prestamos_activos %}
+                <div class="col-12">
+                    <div class="card card-custom bg-white p-3 border-start border-4 {% if p.dias_retraso > 0 %}border-danger{% elif p.dias_retraso == 0 %}border-warning{% else %}border-success{% endif %}">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <span class="badge bg-light text-secondary border font-monospace">{{ p.codigo_patrimonio }}</span>
+                            {% if p.dias_retraso > 0 %}
+                                <span class="badge bg-danger"><i class="bi bi-exclamation-octagon me-1"></i>Plazo Vencido (+{{ p.dias_retraso }} días)</span>
+                            {% elif p.dias_retraso == 0 %}
+                                <span class="badge bg-warning text-dark"><i class="bi bi-alarm me-1"></i>Vence hoy</span>
+                            {% else %}
+                                <span class="badge bg-success-subtle text-success border border-success-subtle">
+                                    <i class="bi bi-clock me-1"></i>Faltan {{ p.dias_retraso|abs }} días para entregar
+                                </span>
+                            {% endif %}
+                        </div>
+
+                        <h5 class="fw-bold text-dark mb-1">{{ p.titulo }}</h5>
+                        <p class="text-muted small mb-2"><i class="bi bi-person me-1"></i>{{ p.autor }}</p>
+
+                        <div class="d-flex justify-content-between align-items-center border-top pt-2 small text-secondary">
+                            <span>Retirado: {{ p.fecha_prestamo.strftime('%d/%m/%Y') }}</span>
+                            <span>Fecha límite: <strong class="text-dark">{{ p.fecha_devolucion_prevista.strftime('%d/%m/%Y') }}</strong></span>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="card card-custom bg-white p-4 text-center mb-4">
+                <i class="bi bi-check2-circle fs-1 text-success mb-2"></i>
+                <h6 class="fw-bold text-dark">No tienes préstamos físicos pendientes</h6>
+                <p class="text-muted small mb-3">Puedes acudir a la biblioteca y solicitar hasta 2 libros físicos en mostrador.</p>
+                <div>
+                    <a href="/catalogo" class="btn btn-outline-primary btn-sm"><i class="bi bi-grid me-1"></i> Explorar Catálogo</a>
+                </div>
+            </div>
+        {% endif %}
+
+        <!-- NUEVO: Mis Últimas Lecturas Digitales -->
+        <h5 class="fw-bold text-dark mb-3"><i class="bi bi-file-earmark-pdf me-2 text-danger"></i>Mis Últimas Lecturas Digitales</h5>
+        {% if lecturas_digitales %}
+            <div class="card card-custom bg-white p-0 mb-4">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0 small">
+                        <thead class="table-light">
+                            <tr>
+                                <th class="ps-3">Recurso Digital</th>
+                                <th>Último Acceso</th>
+                                <th class="text-end pe-3">Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for ld in lecturas_digitales %}
+                            <tr>
+                                <td class="ps-3">
+                                    <strong class="d-block text-dark">{{ ld.titulo }}</strong>
+                                    <small class="text-muted">{{ ld.autor }}</small>
+                                </td>
+                                <td class="text-muted">{{ ld.fecha_acceso.strftime('%d/%m/%Y %H:%M') }}</td>
+                                <td class="text-end pe-3">
+                                    <a href="/leer/{{ ld.libro_id }}" class="btn btn-outline-primary btn-sm">
+                                        <i class="bi bi-book-half me-1"></i> Volver a leer
+                                    </a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        {% else %}
+            <div class="card card-custom bg-white p-3 text-center text-muted small mb-4">
+                Aún no has abierto libros digitales en línea.
+            </div>
+        {% endif %}
+
+        <!-- Historial de Libros Físicos Devueltos -->
+        <h5 class="fw-bold text-dark mb-3"><i class="bi bi-clock-history me-2 text-secondary"></i>Historial de Devoluciones Físicas</h5>
+        {% if historial_devueltos %}
+            <div class="card card-custom bg-white p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0 small">
+                        <thead class="table-light">
+                            <tr>
+                                <th class="ps-3">Libro</th>
+                                <th>Copia</th>
+                                <th>Fecha Devolución</th>
+                                <th>Estado</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for h in historial_devueltos %}
+                            <tr>
+                                <td class="ps-3 fw-semibold text-dark">{{ h.titulo }}</td>
+                                <td class="font-monospace text-muted">{{ h.codigo_patrimonio }}</td>
+                                <td>{{ h.fecha_devolucion_real.strftime('%d/%m/%Y') if h.fecha_devolucion_real else '-' }}</td>
+                                <td><span class="badge bg-light text-success border">Devuelto</span></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        {% else %}
+            <div class="card card-custom bg-white p-3 text-center text-muted small">
+                Aún no registras devoluciones físicas en tu historial.
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

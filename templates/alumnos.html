@@ -1,0 +1,271 @@
+{% extends 'base.html' %}
+
+{% block title %}Padrón de Estudiantes — IESTP Utcubamba{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+    <div>
+        <h2 class="fw-bold text-dark mb-1"><i class="bi bi-people-fill me-2 text-primary"></i>Padrón de Estudiantes</h2>
+        <p class="text-muted mb-0">Gestión de cuentas institucionales para las 4 carreras profesionales.</p>
+    </div>
+    <button class="btn btn-primary fw-semibold" data-bs-toggle="modal" data-bs-target="#modalNuevoAlumno">
+        <i class="bi bi-person-plus-fill me-1"></i> Registrar Nuevo Estudiante
+    </button>
+</div>
+
+<!-- Filtros y Buscador de Alumnos -->
+<div class="card card-custom bg-white mb-4">
+    <div class="card-body py-3">
+        <form method="GET" action="/admin/alumnos" class="row g-2 align-items-center">
+            <div class="col-md-5">
+                <div class="input-group">
+                    <span class="input-group-text bg-light text-muted"><i class="bi bi-search"></i></span>
+                    <input type="text" name="q" class="form-control" placeholder="Buscar por DNI, nombres o apellidos..." value="{{ busqueda }}">
+                </div>
+            </div>
+            <div class="col-md-4">
+                <select name="carrera" class="form-select">
+                    <option value="">-- Todas las Carreras --</option>
+                    {% for c in carreras %}
+                        <option value="{{ c.carrera_id }}" {% if carrera_sel == c.carrera_id|string %}selected{% endif %}>
+                            {{ c.codigo }} - {{ c.nombre }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3 d-flex gap-2">
+                <button type="submit" class="btn btn-secondary w-100"><i class="bi bi-funnel me-1"></i> Filtrar</button>
+                {% if busqueda or carrera_sel %}
+                    <a href="/admin/alumnos" class="btn btn-outline-secondary"><i class="bi bi-x"></i></a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Tabla de Alumnos -->
+<div class="card card-custom bg-white">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0" style="font-size: 0.9rem;">
+                <thead class="table-light">
+                    <tr>
+                        <th class="ps-4">DNI</th>
+                        <th>Estudiante</th>
+                        <th>Carrera</th>
+                        <th>Ciclo</th>
+                        <th>Préstamos</th>
+                        <th>Estado</th>
+                        <th class="text-end pe-4">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for al in alumnos %}
+                    <tr>
+                        <td class="ps-4 fw-bold text-dark">{{ al.dni }}</td>
+                        <td>
+                            <strong class="d-block">{{ al.nombres }} {{ al.apellidos }}</strong>
+                        </td>
+                        <td>
+                            <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle">
+                                {{ al.carrera_codigo }}
+                            </span>
+                            <small class="text-muted d-block text-truncate" style="max-width: 200px;">{{ al.carrera_nombre }}</small>
+                        </td>
+                        <td>Ciclo {{ al.ciclo }}</td>
+                        <td>
+                            <span class="badge {% if al.prestamos_activos > 0 %}bg-warning text-dark{% else %}bg-light text-muted border{% endif %}">
+                                {{ al.prestamos_activos }} activo(s)
+                            </span>
+                        </td>
+                        <td>
+                            {% if al.estado == 'ACTIVO' %}
+                                <span class="badge bg-success-subtle text-success border border-success-subtle">Activo</span>
+                            {% else %}
+                                <span class="badge bg-danger-subtle text-danger border border-danger-subtle">Inactivo</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end pe-4">
+                            <!-- Botón Editar -->
+                            <button class="btn btn-outline-secondary btn-sm" 
+                                    data-bs-toggle="modal" 
+                                    data-bs-target="#modalEditarAlumno"
+                                    data-id="{{ al.usuario_id }}"
+                                    data-dni="{{ al.dni }}"
+                                    data-nombres="{{ al.nombres }}"
+                                    data-apellidos="{{ al.apellidos }}"
+                                    data-carrera="{{ al.carrera_id }}"
+                                    data-ciclo="{{ al.ciclo }}"
+                                    data-estado="{{ al.estado }}"
+                                    title="Editar datos">
+                                <i class="bi bi-pencil-square"></i>
+                            </button>
+
+                            <!-- Botón Resetear Clave al DNI -->
+                            <form method="POST" action="/admin/alumnos/reset/{{ al.usuario_id }}" class="d-inline" onsubmit="return confirm('¿Restablecer la contraseña del alumno a su número de DNI?');">
+                                <button type="submit" class="btn btn-outline-warning btn-sm text-dark" title="Restablecer clave al DNI">
+                                    <i class="bi bi-key-fill"></i>
+                                </button>
+                            </form>
+
+                            <!-- Botón Eliminar / Desactivar -->
+                            <form method="POST" action="/admin/alumnos/eliminar/{{ al.usuario_id }}" class="d-inline" onsubmit="return confirm('¿Está seguro de eliminar o desactivar este estudiante?');">
+                                <button type="submit" class="btn btn-outline-danger btn-sm" title="Eliminar estudiante">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="text-center py-5 text-muted">
+                            <i class="bi bi-person-x fs-1 d-block mb-2"></i>
+                            No se encontraron estudiantes registrados con los criterios seleccionados.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL: REGISTRAR NUEVO ALUMNO -->
+<div class="modal fade" id="modalNuevoAlumno" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title fs-6"><i class="bi bi-person-plus-fill me-2"></i>Registrar Nuevo Estudiante</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" action="/admin/alumnos/crear">
+                <div class="modal-body p-4">
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold text-secondary">DNI (8 dígitos)</label>
+                        <input type="text" name="dni" class="form-control" maxlength="8" pattern="[0-9]{8}" placeholder="Ej. 74859612" required>
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label class="form-label small fw-semibold text-secondary">Nombres</label>
+                            <input type="text" name="nombres" class="form-control" placeholder="Ej. Juan Carlos" required>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small fw-semibold text-secondary">Apellidos</label>
+                            <input type="text" name="apellidos" class="form-control" placeholder="Ej. Perez Gomez" required>
+                        </div>
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col-8">
+                            <label class="form-label small fw-semibold text-secondary">Programa de Estudios</label>
+                            <select name="carrera_id" class="form-select" required>
+                                <option value="" selected disabled>Seleccionar carrera...</option>
+                                {% for c in carreras %}
+                                    <option value="{{ c.carrera_id }}">{{ c.codigo }} - {{ c.nombre }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label small fw-semibold text-secondary">Ciclo</label>
+                            <select name="ciclo" class="form-select" required>
+                                <option value="I">I</option>
+                                <option value="II">II</option>
+                                <option value="III">III</option>
+                                <option value="IV">IV</option>
+                                <option value="V">V</option>
+                                <option value="VI" selected>VI</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="alert alert-info py-2 small mb-0">
+                        <i class="bi bi-info-circle me-1"></i> La contraseña inicial del alumno será su propio <strong>número de DNI</strong>.
+                    </div>
+                </div>
+                <div class="modal-footer bg-light py-2">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary btn-sm fw-semibold">Guardar Estudiante</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL: EDITAR ALUMNO -->
+<div class="modal fade" id="modalEditarAlumno" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-dark text-white">
+                <h5 class="modal-title fs-6"><i class="bi bi-pencil-square me-2"></i>Editar Datos del Estudiante</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" id="formEditarAlumno" action="">
+                <div class="modal-body p-4">
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold text-secondary">DNI (No editable)</label>
+                        <input type="text" id="edit_dni" class="form-control bg-light" readonly>
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label class="form-label small fw-semibold text-secondary">Nombres</label>
+                            <input type="text" name="nombres" id="edit_nombres" class="form-control" required>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small fw-semibold text-secondary">Apellidos</label>
+                            <input type="text" name="apellidos" id="edit_apellidos" class="form-control" required>
+                        </div>
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col-8">
+                            <label class="form-label small fw-semibold text-secondary">Carrera</label>
+                            <select name="carrera_id" id="edit_carrera" class="form-select" required>
+                                {% for c in carreras %}
+                                    <option value="{{ c.carrera_id }}">{{ c.codigo }} - {{ c.nombre }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label small fw-semibold text-secondary">Ciclo</label>
+                            <select name="ciclo" id="edit_ciclo" class="form-select" required>
+                                <option value="I">I</option>
+                                <option value="II">II</option>
+                                <option value="III">III</option>
+                                <option value="IV">IV</option>
+                                <option value="V">V</option>
+                                <option value="VI">VI</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mb-0">
+                        <label class="form-label small fw-semibold text-secondary">Estado Académico</label>
+                        <select name="estado" id="edit_estado" class="form-select" required>
+                            <option value="ACTIVO">ACTIVO (Habilitado para préstamos)</option>
+                            <option value="INACTIVO">INACTIVO (Licencia o Retirado)</option>
+                            <option value="SANCIONADO">SANCIONADO (Suspendido por mora)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light py-2">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary btn-sm fw-semibold">Guardar Cambios</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    const modalEditar = document.getElementById('modalEditarAlumno');
+    if (modalEditar) {
+        modalEditar.addEventListener('show.bs.modal', function (event) {
+            const btn = event.relatedTarget;
+            const id = btn.getAttribute('data-id');
+            document.getElementById('formEditarAlumno').action = '/admin/alumnos/editar/' + id;
+            document.getElementById('edit_dni').value = btn.getAttribute('data-dni');
+            document.getElementById('edit_nombres').value = btn.getAttribute('data-nombres');
+            document.getElementById('edit_apellidos').value = btn.getAttribute('data-apellidos');
+            document.getElementById('edit_carrera').value = btn.getAttribute('data-carrera');
+            document.getElementById('edit_ciclo').value = btn.getAttribute('data-ciclo');
+            document.getElementById('edit_estado').value = btn.getAttribute('data-estado');
+        });
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,261 @@
+{% extends 'base.html' %}
+
+{% block title %}Mostrador de Préstamos — IESTP Utcubamba{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="fw-bold text-dark mb-1"><i class="bi bi-pc-display me-2 text-primary"></i>Mostrador de Atención Rápida</h2>
+        <p class="text-muted mb-0">Registro de préstamos con custodia de carnet físico y recepción de devoluciones.</p>
+    </div>
+</div>
+
+<div class="row g-4">
+    <!-- Columna Izquierda: Identificación y Préstamo -->
+    <div class="col-lg-5">
+        <div class="card card-custom bg-white p-4">
+            <h5 class="fw-bold text-dark mb-3"><i class="bi bi-person-vcard me-2 text-primary"></i>1. Verificar Carnet del Alumno</h5>
+            
+            <form method="GET" action="/admin/mostrador" class="mb-3">
+                <label class="form-label small fw-semibold text-secondary">Digitar DNI del Carnet</label>
+                <div class="input-group">
+                    <input type="text" name="dni" class="form-control" maxlength="8" placeholder="8 dígitos del DNI..." value="{{ dni_buscado }}" required autofocus>
+                    <button class="btn btn-primary" type="submit"><i class="bi bi-search me-1"></i> Buscar</button>
+                </div>
+            </form>
+
+            {% if alumno %}
+                <div class="alert alert-light border p-3 mb-3">
+                    <div class="d-flex justify-content-between align-items-start mb-1">
+                        <h6 class="fw-bold text-dark mb-0">{{ alumno.nombres }} {{ alumno.apellidos }}</h6>
+                        <span class="badge bg-success">Habilitado</span>
+                    </div>
+                    <small class="text-muted d-block"><i class="bi bi-mortarboard me-1"></i>Carrera: <strong>{{ alumno.carrera_nombre }}</strong> (Ciclo {{ alumno.ciclo }})</small>
+                    <small class="text-muted d-block mt-1">
+                        <i class="bi bi-book me-1"></i>Libros en poder: 
+                        <strong class="{% if alumno.prestamos_activos >= 2 %}text-danger{% else %}text-primary{% endif %}">
+                            {{ alumno.prestamos_activos }} de 2 permitidos
+                        </strong>
+                    </small>
+                </div>
+
+                {% if alumno.prestamos_activos >= 2 %}
+                    <div class="alert alert-danger py-2 small">
+                        <i class="bi bi-exclamation-triangle-fill me-1"></i> El estudiante ya tiene 2 préstamos activos y su carnet en custodia. Debe devolver un libro antes de solicitar otro.
+                    </div>
+                {% else %}
+                    <h5 class="fw-bold text-dark mb-2 mt-4"><i class="bi bi-journal-plus me-2 text-success"></i>2. Entregar Ejemplar y Retener Carnet</h5>
+                    <form method="POST" action="/admin/prestar">
+                        <input type="hidden" name="usuario_id" value="{{ alumno.usuario_id }}">
+                        <input type="hidden" name="dni" value="{{ alumno.dni }}">
+                        
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold text-secondary">Buscar y Seleccionar Copia Física en Sala</label>
+                            
+                            <!-- NUEVO: Buscador instantáneo de libros y códigos -->
+                            <div class="input-group input-group-sm mb-2">
+                                <span class="input-group-text bg-light text-primary"><i class="bi bi-search"></i></span>
+                                <input type="text" id="filtroLibroInput" class="form-control" placeholder="Escribe el nombre del libro o código para filtrar...">
+                            </div>
+
+                            <!-- Lista desplegable conectada al buscador -->
+                            <select name="ejemplar_id" id="selectEjemplar" class="form-select" required>
+                                <option value="" selected disabled>-- Selecciona el libro y código de copia ({{ ejemplares_libres|length }} libres) --</option>
+                                {% for ej in ejemplares_libres %}
+                                    <option value="{{ ej.ejemplar_id }}">
+                                        {{ ej.titulo }} [{{ ej.codigo_patrimonio }} - {{ ej.ubicacion_estante }}]
+                                    </option>
+                                {% endfor %}
+                            </select>
+                            <small id="contadorFiltro" class="text-muted d-block mt-1" style="font-size: 0.75rem;">
+                                Mostrando {{ ejemplares_libres|length }} copias disponibles en estantería.
+                            </small>
+                        </div>
+
+                        <!-- Casilla obligatoria de Custodia de Carnet Físico -->
+                        <div class="form-check bg-warning-subtle border border-warning rounded p-3 mb-3 ps-5">
+                            <input class="form-check-input" type="checkbox" name="custodia_carnet" value="SI" id="chkCarnet" required>
+                            <label class="form-check-label small fw-semibold text-dark" for="chkCarnet">
+                                <i class="bi bi-person-badge-fill me-1 text-warning-emphasis"></i>
+                                Confirmo que recibí el carnet físico del alumno y queda retenido en mostrador.
+                            </label>
+                        </div>
+                        
+                        <div class="alert alert-info py-2 small mb-3">
+                            <i class="bi bi-calendar-event me-1"></i> Plazo automático de devolución: <strong>7 días calendario</strong>.
+                        </div>
+
+                        <button type="submit" class="btn btn-success w-100 fw-semibold py-2">
+                            <i class="bi bi-check-circle me-1"></i> Registrar Préstamo y Custodia
+                        </button>
+                    </form>
+                {% endif %}
+            {% elif dni_buscado %}
+                <div class="alert alert-warning py-2 small">
+                    <i class="bi bi-x-circle me-1"></i> No se encontró ningún estudiante activo con el DNI <strong>{{ dni_buscado }}</strong>.
+                </div>
+            {% else %}
+                <div class="text-center py-4 text-muted small">
+                    <i class="bi bi-person-bounding-box fs-1 d-block mb-2 text-secondary"></i>
+                    Solicita el carnet al alumno, digita su DNI para verificar sus datos y registra el préstamo.
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Columna Derecha: Préstamos Activos, Carnets en Custodia y Devolución -->
+    <div class="col-lg-7">
+        <div class="card card-custom bg-white p-4">
+            <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                <h5 class="fw-bold text-dark mb-0">
+                    <i class="bi bi-inboxes-fill me-2 text-primary"></i>Libros Prestados y Carnets en Custodia ({{ prestamos_activos|length }})
+                </h5>
+                {% if prestamos_activos %}
+                <!-- Filtro rápido para buscar devoluciones -->
+                <div class="input-group input-group-sm" style="max-width: 220px;">
+                    <span class="input-group-text bg-light"><i class="bi bi-funnel"></i></span>
+                    <input type="text" id="filtroPrestamosActivos" class="form-control" placeholder="Filtrar alumno o libro...">
+                </div>
+                {% endif %}
+            </div>
+            
+            {% if prestamos_activos %}
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0" id="tablaPrestamosActivos" style="font-size: 0.86rem;">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Alumno / Garantía</th>
+                                <th>Libro y Ejemplar</th>
+                                <th>Vencimiento</th>
+                                <th class="text-end">Recepción y Devolución</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for p in prestamos_activos %}
+                            <tr>
+                                <td>
+                                    <strong class="d-block text-dark">{{ p.nombres }} {{ p.apellidos }}</strong>
+                                    <small class="text-muted d-block">DNI: {{ p.dni }}</small>
+                                    <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle mt-1">
+                                        <i class="bi bi-person-badge me-1"></i>Carnet en mostrador
+                                    </span>
+                                </td>
+                                <td>
+                                    <span class="d-block fw-semibold text-truncate" style="max-width: 200px;">{{ p.titulo }}</span>
+                                    <span class="badge bg-light text-secondary border font-monospace">{{ p.codigo_patrimonio }}</span>
+                                </td>
+                                <td>
+                                    <span class="d-block fw-semibold">{{ p.fecha_devolucion_prevista.strftime('%d/%m/%Y') }}</span>
+                                    <span class="badge bg-success-subtle text-success border border-success-subtle">En plazo</span>
+                                </td>
+                                <td class="text-end">
+                                    <form method="POST" action="/admin/devolver/{{ p.prestamo_id }}" class="d-inline-flex gap-1 align-items-center" onsubmit="return confirm('¿Confirmar recepción del libro y entregar su carnet físico al alumno?');">
+                                        <select name="estado_retorno" class="form-select form-select-sm" style="width: 115px; font-size: 0.78rem;" title="Estado físico del libro">
+                                            <option value="DISPONIBLE" selected>Buen estado</option>
+                                            <option value="MANTENIMIENTO">Dañado</option>
+                                        </select>
+                                        <button type="submit" class="btn btn-primary btn-sm fw-semibold" title="Recibir libro y devolver carnet">
+                                            <i class="bi bi-arrow-return-left"></i> Devolver
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="text-center py-5 text-muted small">
+                    <i class="bi bi-inbox fs-1 d-block mb-2 text-secondary"></i>
+                    No hay préstamos activos ni carnets retenidos en este momento.
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Script para Filtrado Instantáneo de Libros y Préstamos (Sin recargar página) -->
+<script>
+    // Función para ignorar tildes y mayúsculas al buscar
+    function normalizarTexto(texto) {
+        return texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    }
+
+    // 1. Buscador en vivo para el selector de libros a prestar
+    const inputFiltroLibro = document.getElementById('filtroLibroInput');
+    const selectEjemplar = document.getElementById('selectEjemplar');
+    const contadorFiltro = document.getElementById('contadorFiltro');
+
+    if (inputFiltroLibro && selectEjemplar) {
+        // Guardamos todas las opciones originales en memoria al cargar
+        const opcionesOriginales = Array.from(selectEjemplar.options).slice(1).map(opt => ({
+            value: opt.value,
+            text: opt.text
+        }));
+
+        inputFiltroLibro.addEventListener('input', function () {
+            const termino = normalizarTexto(this.value.trim());
+            
+            // Limpiamos el select actual
+            selectEjemplar.innerHTML = '';
+
+            // Filtramos las coincidencias
+            const coincidencias = opcionesOriginales.filter(item => 
+                normalizarTexto(item.text).includes(termino)
+            );
+
+            if (coincidencias.length > 0) {
+                // Opción de cabecera
+                const defaultOpt = document.createElement('option');
+                defaultOpt.value = '';
+                defaultOpt.disabled = true;
+                defaultOpt.text = `-- ${coincidencias.length} copia(s) encontrada(s) --`;
+                selectEjemplar.appendChild(defaultOpt);
+
+                coincidencias.forEach((item, index) => {
+                    const opt = document.createElement('option');
+                    opt.value = item.value;
+                    opt.text = item.text;
+                    // Si el usuario escribió algo en el buscador, autoseleccionamos el primer resultado
+                    if (termino !== '' && index === 0) {
+                        opt.selected = true;
+                    }
+                    selectEjemplar.appendChild(opt);
+                });
+
+                if (termino === '') {
+                    selectEjemplar.selectedIndex = 0;
+                }
+                contadorFiltro.innerText = `Mostrando ${coincidencias.length} copia(s) disponible(s).`;
+                contadorFiltro.className = 'text-muted d-block mt-1';
+            } else {
+                const emptyOpt = document.createElement('option');
+                emptyOpt.value = '';
+                emptyOpt.disabled = true;
+                emptyOpt.selected = true;
+                emptyOpt.text = '-- No se encontraron copias con ese nombre --';
+                selectEjemplar.appendChild(emptyOpt);
+
+                contadorFiltro.innerText = 'Sin coincidencias. Intenta con otra palabra.';
+                contadorFiltro.className = 'text-danger fw-semibold d-block mt-1';
+            }
+        });
+    }
+
+    // 2. Buscador en vivo para la tabla de préstamos activos (Devoluciones)
+    const inputFiltroActivos = document.getElementById('filtroPrestamosActivos');
+    const tablaActivos = document.getElementById('tablaPrestamosActivos');
+
+    if (inputFiltroActivos && tablaActivos) {
+        inputFiltroActivos.addEventListener('input', function () {
+            const termino = normalizarTexto(this.value.trim());
+            const filas = tablaActivos.querySelectorAll('tbody tr');
+
+            filas.forEach(fila => {
+                const contenidoFila = normalizarTexto(fila.innerText);
+                fila.style.display = contenidoFila.includes(termino) ? '' : 'none';
+            });
+        });
+    }
+</script>
+{% endblock %}

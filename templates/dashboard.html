@@ -1,0 +1,168 @@
+{% extends 'base.html' %}
+
+{% block title %}Dashboard y Reportes — IESTP Utcubamba{% endblock %}
+
+{% block content %}
+<!-- Encabezado con Botón Imprimir -->
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+    <div>
+        <h2 class="fw-bold text-dark mb-1"><i class="bi bi-speedometer2 me-2 text-primary"></i>Panel de Control y Reportes</h2>
+        <p class="text-muted mb-0">Monitoreo en tiempo real del acervo, préstamos activos y alertas de morosidad.</p>
+    </div>
+    <div class="no-print">
+        <button onclick="window.print()" class="btn btn-outline-secondary fw-semibold">
+            <i class="bi bi-printer me-1"></i> Imprimir Reporte Oficial
+        </button>
+    </div>
+</div>
+
+<!-- TARJETAS DE INDICADORES (KPIs) -->
+<div class="row g-3 mb-4">
+    <div class="col-md-4 col-lg-2">
+        <div class="card card-custom bg-white p-3 text-center h-100 border-start border-4 border-primary">
+            <small class="text-muted fw-semibold d-block">Títulos en Catálogo</small>
+            <span class="fs-3 fw-bold text-primary mt-1">{{ total_titulos }}</span>
+            <small class="text-muted" style="font-size: 0.75rem;">Obras registradas</small>
+        </div>
+    </div>
+    <div class="col-md-4 col-lg-2">
+        <div class="card card-custom bg-white p-3 text-center h-100 border-start border-4 border-success">
+            <small class="text-muted fw-semibold d-block">Ejemplares Libres</small>
+            <span class="fs-3 fw-bold text-success mt-1">{{ copias_disponibles }}</span>
+            <small class="text-muted" style="font-size: 0.75rem;">de {{ total_copias }} en sala</small>
+        </div>
+    </div>
+    <div class="col-md-4 col-lg-2">
+        <div class="card card-custom bg-white p-3 text-center h-100 border-start border-4 border-info">
+            <small class="text-muted fw-semibold d-block">Préstamos Activos</small>
+            <span class="fs-3 fw-bold text-info-emphasis mt-1">{{ prestamos_activos_total }}</span>
+            <small class="text-muted" style="font-size: 0.75rem;">En poder de alumnos</small>
+        </div>
+    </div>
+    <div class="col-md-6 col-lg-3">
+        <div class="card card-custom bg-white p-3 text-center h-100 border-start border-4 border-danger">
+            <small class="text-muted fw-semibold d-block">Préstamos Vencidos</small>
+            <span class="fs-3 fw-bold text-danger mt-1">{{ prestamos_vencidos_total }}</span>
+            <small class="text-danger fw-semibold" style="font-size: 0.75rem;">
+                {% if prestamos_vencidos_total > 0 %}
+                    <i class="bi bi-exclamation-triangle-fill me-1"></i>Requiere regularización
+                {% else %}
+                    <i class="bi bi-check-circle me-1"></i>Al día sin moras
+                {% endif %}
+            </small>
+        </div>
+    </div>
+    <div class="col-md-6 col-lg-3">
+        <div class="card card-custom bg-white p-3 text-center h-100 border-start border-4 border-secondary">
+            <small class="text-muted fw-semibold d-block">Estudiantes Activos</small>
+            <span class="fs-3 fw-bold text-dark mt-1">{{ total_alumnos }}</span>
+            <small class="text-muted" style="font-size: 0.75rem;">Padrón de 4 carreras</small>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4">
+    <!-- Columna Principal: Reporte Detallado de Préstamos y Alertas -->
+    <div class="col-lg-8">
+        <div class="card card-custom bg-white p-4">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="fw-bold text-dark mb-0">
+                    <i class="bi bi-clock-history me-2 text-primary"></i>Estado de Préstamos y Alertas de Retorno
+                </h5>
+                <span class="badge bg-light text-secondary border">Total: {{ reporte_prestamos|length }}</span>
+            </div>
+
+            {% if reporte_prestamos %}
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0" style="font-size: 0.88rem;">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Estudiante</th>
+                                <th>Carrera</th>
+                                <th>Libro en Préstamo</th>
+                                <th>Vencimiento</th>
+                                <th>Condición</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for p in reporte_prestamos %}
+                            <tr>
+                                <td>
+                                    <strong class="d-block text-dark">{{ p.nombres }} {{ p.apellidos }}</strong>
+                                    <small class="text-muted">DNI: {{ p.dni }}</small>
+                                </td>
+                                <td>
+                                    <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle">
+                                        {{ p.carrera_codigo }} (Ciclo {{ p.ciclo }})
+                                    </span>
+                                </td>
+                                <td>
+                                    <span class="d-block fw-semibold text-truncate" style="max-width: 220px;">{{ p.titulo }}</span>
+                                    <small class="text-muted font-monospace">{{ p.codigo_patrimonio }}</small>
+                                </td>
+                                <td>{{ p.fecha_devolucion_prevista.strftime('%d/%m/%Y') }}</td>
+                                <td>
+                                    {% if p.dias_retraso > 0 %}
+                                        <span class="badge bg-danger">
+                                            <i class="bi bi-exclamation-octagon me-1"></i>Vencido (+{{ p.dias_retraso }} d)
+                                        </span>
+                                    {% elif p.dias_retraso == 0 %}
+                                        <span class="badge bg-warning text-dark">
+                                            <i class="bi bi-alarm me-1"></i>Vence hoy
+                                        </span>
+                                    {% else %}
+                                        <span class="badge bg-success-subtle text-success border border-success-subtle">
+                                            <i class="bi bi-check2 me-1"></i>A tiempo ({{ p.dias_retraso|abs }} d)
+                                        </span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="text-center py-5 text-muted small">
+                    <i class="bi bi-journal-check fs-1 d-block mb-2 text-success"></i>
+                    No hay préstamos pendientes de devolución. Todo el inventario se encuentra disponible en sala.
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Columna Lateral: Distribución por Carrera y Acciones Rápidas -->
+    <div class="col-lg-4">
+        <!-- Padrón por Carrera -->
+        <div class="card card-custom bg-white p-4 mb-4">
+            <h6 class="fw-bold text-dark mb-3"><i class="bi bi-mortarboard me-2 text-primary"></i>Padrón por Programa de Estudios</h6>
+            <div class="list-group list-group-flush small">
+                {% for c in resumen_carreras %}
+                <div class="list-group-item d-flex justify-content-between align-items-center px-0 py-2">
+                    <div>
+                        <strong class="d-block text-dark">{{ c.codigo }}</strong>
+                        <small class="text-muted">{{ c.nombre }}</small>
+                    </div>
+                    <span class="badge bg-secondary rounded-pill">{{ c.total_alumnos }} alumnos</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Acciones Directas -->
+        <div class="card card-custom bg-white p-4 no-print">
+            <h6 class="fw-bold text-dark mb-3"><i class="bi bi-lightning-charge me-2 text-warning"></i>Accesos Rápidos</h6>
+            <div class="d-grid gap-2">
+                <a href="/admin/mostrador" class="btn btn-warning fw-semibold btn-sm py-2">
+                    <i class="bi bi-pc-display me-1"></i> Ir al Mostrador de Atención
+                </a>
+                <a href="/admin/alumnos" class="btn btn-outline-primary btn-sm py-2">
+                    <i class="bi bi-person-plus-fill me-1"></i> Administrar Estudiantes
+                </a>
+                <a href="/admin/libros" class="btn btn-outline-info text-dark btn-sm py-2">
+                    <i class="bi bi-plus-circle me-1"></i> Agregar Libros o Ejemplares
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

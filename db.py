@@ -5,7 +5,33 @@ import re
 from datetime import datetime
 
 # ==========================================
-# GESTOR DE FILAS COMPATIBLE (SQL Server & SQLite)
+# TRADUCTOR INTELIGENTE DE CONSULTAS SQL
+# ==========================================
+def clean_sql_for_sqlite(sql):
+    if not isinstance(sql, str):
+        return sql
+    
+    # 1. Traduce VARCHAR(MAX) y NVARCHAR(MAX) a TEXT
+    sql = re.sub(r'VARCHAR\s*\(\s*MAX\s*\)', 'TEXT', sql, flags=re.IGNORECASE)
+    sql = re.sub(r'NVARCHAR\s*\(\s*MAX\s*\)', 'TEXT', sql, flags=re.IGNORECASE)
+    
+    # 2. Traduce subconsultas (SELECT TOP N ... FROM ...) a (SELECT ... FROM ... LIMIT N)
+    sql = re.sub(
+        r'\(\s*SELECT\s+TOP\s+(\d+)\s+([^)]+)\)',
+        lambda m: f"(SELECT {m.group(2)} LIMIT {m.group(1)})",
+        sql,
+        flags=re.IGNORECASE
+    )
+    
+    # 3. Traduce consultas principales SELECT TOP N ... a LIMIT N
+    match = re.search(r'^\s*SELECT\s+TOP\s+(\d+)\s+(.+)', sql, flags=re.IGNORECASE | re.DOTALL)
+    if match and not re.search(r'\bLIMIT\b', match.group(2), flags=re.IGNORECASE):
+        sql = f"SELECT {match.group(2)} LIMIT {match.group(1)}"
+        
+    return sql
+
+# ==========================================
+# FILAS Y CURSORES COMPATIBLES
 # ==========================================
 def normalize_key(k):
     return k.lower().replace('_', '') if isinstance(k, str) else k
@@ -61,31 +87,26 @@ class UniversalRow(dict):
         val = self[key]
         return val if val is not None else default
 
-# ==========================================
-# TRADUCTOR DE CONSULTAS SQL
-# ==========================================
 class CompatCursor:
     def __init__(self, real_cursor):
         self._cur = real_cursor
 
     def execute(self, sql, params=()):
-        # Traduce SELECT TOP N a LIMIT N para compatibilidad total
-        match = re.search(r'SELECT\s+TOP\s+(\d+)\s+(.+)', sql, flags=re.IGNORECASE | re.DOTALL)
-        if match:
-            limit_num = match.group(1)
-            rest = match.group(2)
-            if not re.search(r'\bLIMIT\b', rest, flags=re.IGNORECASE):
-                sql = f"SELECT {rest} LIMIT {limit_num}"
-        return self._cur.execute(sql, params)
+        sql_clean = clean_sql_for_sqlite(sql)
+        return self._cur.execute(sql_clean, params)
 
     def executemany(self, sql, seq):
-        return self._cur.executemany(sql, seq)
+        sql_clean = clean_sql_for_sqlite(sql)
+        return self._cur.executemany(sql_clean, seq)
 
     def fetchone(self):
         return self._cur.fetchone()
 
     def fetchall(self):
         return self._cur.fetchall()
+
+    def __iter__(self):
+        return iter(self._cur)
 
     def __getattr__(self, name):
         return getattr(self._cur, name)
@@ -110,7 +131,7 @@ class CompatConnection:
         return getattr(self._conn, name)
 
 # ==========================================
-# FUNCIONES SQL PERSONALIZADAS
+# FUNCIONES SQL ADICIONALES
 # ==========================================
 def sqlite_datediff(unit, d1, d2):
     if not d1 or not d2:
@@ -130,7 +151,7 @@ def sqlite_datediff(unit, d1, d2):
     return int((t2.date() - t1.date()).days)
 
 # ==========================================
-# INICIALIZACIÓN DE DATOS (NUBE / RENDER)
+# AUTO-RELLENO DE BASE DE DATOS EN LA NUBE
 # ==========================================
 DB_SQLITE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'biblioteca_cloud.db')
 
@@ -165,8 +186,14 @@ def seed_cloud_database(conn):
         isbn TEXT,
         tipo_recurso TEXT DEFAULT 'HIBRIDO',
         archivo_pdf_url TEXT,
-        descripcion TEXT,
-        carrera_id INTEGER,
+        descripcion TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS LibroCarrera (
+        libro_id INTEGER NOT NULL,
+        carrera_id INTEGER NOT NULL,
+        PRIMARY KEY (libro_id, carrera_id),
+        FOREIGN KEY (libro_id) REFERENCES Libros(libro_id),
         FOREIGN KEY (carrera_id) REFERENCES Carreras(carrera_id)
     );
 
@@ -221,13 +248,22 @@ def seed_cloud_database(conn):
             ('73456789', 'Ana Lucía', 'Pérez Torres', '73456789', 'ALUMNO', 4, 5, 'ACTIVO')
         ])
 
-        cur.executemany("INSERT INTO Libros (libro_id, titulo, autor, editorial, anio_publicacion, tipo_recurso, archivo_pdf_url, carrera_id, descripcion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", [
-            (1, 'Redes y Conectividad de Datos', 'Andrew S. Tanenbaum', 'Pearson', 2021, 'HIBRIDO', 'redes_datos.pdf', 1, 'Topologías, protocolos TCP/IP y diseño de redes corporativas.'),
-            (2, 'Desarrollo Web con Python y Flask', 'Miguel Grinberg', 'O Reilly', 2023, 'HIBRIDO', 'python_flask.pdf', 1, 'Arquitectura MVC, APIs REST y plantillas Jinja2.'),
-            (3, 'Manual de Primeros Auxilios y Soporte Básico', 'Cruz Roja Internacional', 'Médica Panamericana', 2022, 'HIBRIDO', 'primeros_auxilios.pdf', 2, 'Protocolos de atención inicial y evaluación de signos vitales.'),
-            (4, 'Farmacología Básica y Clínica', 'Bertram G. Katzung', 'McGraw-Hill', 2021, 'FISICO', None, 2, 'Clasificación de fármacos, dosis terapéuticas y farmacovigilancia.'),
-            (5, 'Manejo Agroecológico de Suelos y Cultivos', 'Miguel A. Altieri', 'Mundiprensa', 2022, 'HIBRIDO', 'manejo_suelos.pdf', 3, 'Fertilidad del suelo, rotación de cultivos y control biológico.'),
-            (6, 'Contabilidad Financiera y Tributaria', 'Erick Valdivia', 'Instituto Pacífico', 2023, 'HIBRIDO', 'contabilidad_tributaria.pdf', 4, 'Normas NIIF, asientos contables y obligaciones fiscales Sunat.')
+        cur.executemany("INSERT INTO Libros (libro_id, titulo, autor, editorial, anio_publicacion, tipo_recurso, archivo_pdf_url, descripcion) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [
+            (1, 'Redes y Conectividad de Datos', 'Andrew S. Tanenbaum', 'Pearson', 2021, 'HIBRIDO', 'redes_datos.pdf', 'Topologías, protocolos TCP/IP y diseño de redes corporativas.'),
+            (2, 'Desarrollo Web con Python y Flask', 'Miguel Grinberg', 'O Reilly', 2023, 'HIBRIDO', 'python_flask.pdf', 'Arquitectura MVC, APIs REST y plantillas Jinja2.'),
+            (3, 'Manual de Primeros Auxilios y Soporte Básico', 'Cruz Roja Internacional', 'Médica Panamericana', 2022, 'HIBRIDO', 'primeros_auxilios.pdf', 'Protocolos de atención inicial y evaluación de signos vitales.'),
+            (4, 'Farmacología Básica y Clínica', 'Bertram G. Katzung', 'McGraw-Hill', 2021, 'FISICO', None, 'Clasificación de fármacos, dosis terapéuticas y farmacovigilancia.'),
+            (5, 'Manejo Agroecológico de Suelos y Cultivos', 'Miguel A. Altieri', 'Mundiprensa', 2022, 'HIBRIDO', 'manejo_suelos.pdf', 'Fertilidad del suelo, rotación de cultivos y control biológico.'),
+            (6, 'Contabilidad Financiera y Tributaria', 'Erick Valdivia', 'Instituto Pacífico', 2023, 'HIBRIDO', 'contabilidad_tributaria.pdf', 'Normas NIIF, asientos contables y obligaciones fiscales Sunat.')
+        ])
+
+        cur.executemany("INSERT INTO LibroCarrera (libro_id, carrera_id) VALUES (?, ?)", [
+            (1, 1),
+            (2, 1),
+            (3, 2),
+            (4, 2),
+            (5, 3),
+            (6, 4)
         ])
 
         cur.executemany("INSERT INTO Ejemplares (libro_id, codigo_patrimonio, estado_fisico, ubicacion_estante) VALUES (?, ?, ?, ?)", [
@@ -250,7 +286,7 @@ def seed_cloud_database(conn):
 # CONEXIÓN PRINCIPAL
 # ==========================================
 def get_db_connection():
-    # 1. Si está en Windows, intenta conectar al SQL Server local
+    # 1. En Windows local: usa SQL Server EQUIPO
     if sys.platform.startswith('win'):
         try:
             import pyodbc
@@ -264,11 +300,12 @@ def get_db_connection():
         except Exception:
             pass
 
-    # 2. En Render (Linux) o respaldo, usa SQLite integrado
+    # 2. En Render (Linux en la nube): usa SQLite con traducción automática
     conn = sqlite3.connect(DB_SQLITE_PATH, check_same_thread=False)
     conn.row_factory = UniversalRow
     conn.create_function("GETDATE", 0, lambda: datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
     conn.create_function("DATEDIFF", 3, sqlite_datediff)
+    conn.create_function("ISNULL", 2, lambda a, b: b if a is None else a)
     seed_cloud_database(conn)
     return CompatConnection(conn)
 

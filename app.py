@@ -793,8 +793,10 @@ def listar_libros():
     conn.close()
     return render_template('libros.html', libros=libros, carreras=carreras, en_mantenimiento=en_mantenimiento)
 
-@app.route('/admin/libros/crear', methods=['POST'])
+@app.route('/admin/libros/crear', methods=['GET', 'POST'])
 def crear_libro():
+    if request.method == 'GET':
+        return redirect(url_for('listar_libros'))
     if not session.get('usuario') or session['usuario']['rol'] != 'ADMIN':
         return redirect(url_for('login'))
 

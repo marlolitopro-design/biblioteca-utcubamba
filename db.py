@@ -91,7 +91,7 @@ class CompatCursor:
     def execute(self, sql, params=None):
         self._inserted_id = None
         if not self._is_postgres:
-            m_out = re.search(r'OUTPUT\s+INSERTED\.\w+', sql, flags=re.IGNORECASE)
+            m_out = re.search(r'OUTPUT\s+INSERTED\.(\w+)', sql, flags=re.IGNORECASE)
             if m_out:
                 sql = re.sub(r'OUTPUT\s+INSERTED\.\w+', '', sql, flags=re.IGNORECASE)
                 sql_clean = clean_sql(sql, False)
@@ -168,7 +168,7 @@ def seed_database(conn, is_postgres=True):
     pk_type = "SERIAL PRIMARY KEY" if is_postgres else "INTEGER PRIMARY KEY AUTOINCREMENT"
     ts_now = "TIMESTAMP DEFAULT CURRENT_TIMESTAMP" if is_postgres else "TEXT"
 
-    cur.execute(f"""
+    schema_sql = f"""
         CREATE TABLE IF NOT EXISTS Carreras (
             carrera_id {pk_type},
             nombre VARCHAR(120) NOT NULL,
@@ -226,7 +226,13 @@ def seed_database(conn, is_postgres=True):
             fecha_acceso {ts_now},
             direccion_ip VARCHAR(50) DEFAULT '127.0.0.1'
         );
-    """)
+    """
+
+    if is_postgres:
+        cur.execute(schema_sql)
+    else:
+        # SQLite requiere executescript para múltiples sentencias
+        conn.executescript(schema_sql)
 
     cur.execute("SELECT COUNT(*) FROM Carreras")
     if cur.fetchone()[0] == 0:
@@ -305,7 +311,7 @@ def get_db_connection():
     except Exception:
         pass
 
-    # 3. Respaldo SQLite auto-inicializado
+    # 3. Respaldo SQLite auto-inicializado sin fallos
     import sqlite3
     db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'biblioteca_cloud.db')
     conn = sqlite3.connect(db_path, check_same_thread=False)

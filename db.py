@@ -1,20 +1,19 @@
 import os
 import sys
-import sqlite3
 import re
 from datetime import datetime
 
 # ==========================================
-# TRADUCTOR INTELIGENTE SQL SERVER -> SQLITE
+# TRADUCTOR SQL SERVER -> POSTGRESQL (SUPABASE)
 # ==========================================
-def clean_sql_for_sqlite(sql):
+def clean_sql_for_postgres(sql):
     if not isinstance(sql, str):
         return sql
     
-    # 1. VARCHAR(MAX) y NVARCHAR(MAX) -> TEXT
+    # 1. Tipos de datos
     sql = re.sub(r'VARCHAR\s*\(\s*MAX\s*\)', 'TEXT', sql, flags=re.IGNORECASE)
     sql = re.sub(r'NVARCHAR\s*\(\s*MAX\s*\)', 'TEXT', sql, flags=re.IGNORECASE)
-    
+
     # 2. DATEDIFF(day, ...) -> DATEDIFF('day', ...)
     sql = re.sub(r'\bDATEDIFF\s*\(\s*([a-zA-Z]+)\s*,', r"DATEDIFF('\1',", sql, flags=re.IGNORECASE)
 
@@ -25,37 +24,35 @@ def clean_sql_for_sqlite(sql):
         sql,
         flags=re.IGNORECASE
     )
-    
+
     # 4. Consultas principales SELECT TOP N ... -> SELECT ... LIMIT N
     match = re.search(r'^\s*SELECT\s+TOP\s+(\d+)\s+(.+)', sql, flags=re.IGNORECASE | re.DOTALL)
     if match and not re.search(r'\bLIMIT\b', match.group(2), flags=re.IGNORECASE):
         sql = f"SELECT {match.group(2)} LIMIT {match.group(1)}"
-        
+
+    # 5. OUTPUT INSERTED.col -> RETURNING col (al final)
+    m_out = re.search(r'OUTPUT\s+INSERTED\.(\w+)', sql, flags=re.IGNORECASE)
+    if m_out:
+        col = m_out.group(1)
+        sql = re.sub(r'OUTPUT\s+INSERTED\.\w+', '', sql, flags=re.IGNORECASE)
+        sql = sql.rstrip().rstrip(';') + f" RETURNING {col}"
+
+    # 6. Reemplaza ? por %s para PostgreSQL
+    sql = re.sub(r'\?', '%s', sql)
+
     return sql
 
 # ==========================================
-# CONVERSOR AUTOMÁTICO DE FECHAS A DATETIME
+# GESTOR DE FILAS COMPATIBLE
 # ==========================================
-def parse_date_if_str(val):
-    if isinstance(val, str) and len(val) >= 10:
-        if val[4] == '-' and val[7] == '-' and val[:4].isdigit() and val[5:7].isdigit() and val[8:10].isdigit():
-            val_clean = val[:19]
-            for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d'):
-                try:
-                    return datetime.strptime(val_clean, fmt)
-                except ValueError:
-                    pass
-    return val
-
 def normalize_key(k):
     return k.lower().replace('_', '') if isinstance(k, str) else k
 
 class UniversalRow(dict):
     def __init__(self, cursor, row):
         super().__init__()
-        self._keys = [col[0] for col in cursor.description]
-        # Convierte cadenas de fecha a objetos datetime reales para soportar .strftime()
-        self._row = [parse_date_if_str(val) for val in row]
+        self._keys = [col.name if hasattr(col, 'name') else col[0] for col in cursor.description]
+        self._row = list(row)
         for idx, col in enumerate(self._keys):
             val = self._row[idx]
             self[col] = val
@@ -84,36 +81,29 @@ class UniversalRow(dict):
 class CompatCursor:
     def __init__(self, cur):
         self._cur = cur
-        self._inserted_id = None
 
     def execute(self, sql, params=()):
-        self._inserted_id = None
-        has_output = bool(re.search(r'OUTPUT\s+INSERTED\.\w+', sql, flags=re.IGNORECASE))
-        if has_output:
-            sql = re.sub(r'OUTPUT\s+INSERTED\.\w+', '', sql, flags=re.IGNORECASE)
-        
-        sql_clean = clean_sql_for_sqlite(sql)
-        res = self._cur.execute(sql_clean, params)
-        if has_output:
-            self._inserted_id = (self._cur.lastrowid,)
-        return res
+        sql_clean = clean_sql_for_postgres(sql)
+        return self._cur.execute(sql_clean, params)
 
     def executemany(self, sql, seq):
-        sql_clean = clean_sql_for_sqlite(sql)
+        sql_clean = clean_sql_for_postgres(sql)
         return self._cur.executemany(sql_clean, seq)
 
     def fetchone(self):
-        if self._inserted_id is not None:
-            val = self._inserted_id
-            self._inserted_id = None
-            return val
-        return self._cur.fetchone()
+        row = self._cur.fetchone()
+        return UniversalRow(self._cur, row) if row else None
 
     def fetchall(self):
-        return self._cur.fetchall()
+        rows = self._cur.fetchall()
+        return [UniversalRow(self._cur, r) for r in rows] if rows else []
 
     def __iter__(self):
-        return iter(self._cur)
+        while True:
+            r = self.fetchone()
+            if r is None:
+                break
+            yield r
 
     def __getattr__(self, name):
         return getattr(self._cur, name)
@@ -138,113 +128,105 @@ class CompatConnection:
         return getattr(self._conn, name)
 
 # ==========================================
-# FUNCIONES SQL VIRTUALES
+# AUTO-CREACIÓN DE TABLAS EN SUPABASE
 # ==========================================
-def sqlite_datediff(unit, d1, d2):
-    if not d1 or not d2:
-        return 0
-    def parse_dt(d):
-        if isinstance(d, datetime):
-            return d
-        d_str = str(d)[:19]
-        for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d', '%Y/%m/%d'):
-            try:
-                return datetime.strptime(d_str, fmt)
-            except ValueError:
-                pass
-        return datetime.now()
-    t1 = parse_dt(d1)
-    t2 = parse_dt(d2)
-    return int((t2.date() - t1.date()).days)
-
-# ==========================================
-# AUTO-RELLENO DE BASE DE DATOS (NUBE)
-# ==========================================
-DB_SQLITE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'biblioteca_cloud.db')
-
-def seed_cloud_database(conn):
+def init_supabase_tables(conn):
     cur = conn.cursor()
-    cur.executescript('''
-    CREATE TABLE IF NOT EXISTS Carreras (
-        carrera_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nombre TEXT NOT NULL,
-        codigo TEXT UNIQUE
-    );
+    # 1. Funciones auxiliares compatibles
+    cur.execute("""
+        CREATE OR REPLACE FUNCTION GETDATE() 
+        RETURNS TIMESTAMP AS $$
+        BEGIN
+            RETURN CURRENT_TIMESTAMP;
+        END;
+        $$ LANGUAGE plpgsql;
 
-    CREATE TABLE IF NOT EXISTS Usuarios (
-        usuario_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        dni TEXT UNIQUE NOT NULL,
-        nombres TEXT NOT NULL,
-        apellidos TEXT NOT NULL,
-        password_hash TEXT NOT NULL,
-        rol TEXT NOT NULL DEFAULT 'ALUMNO',
-        carrera_id INTEGER,
-        ciclo INTEGER DEFAULT 1,
-        estado TEXT DEFAULT 'ACTIVO',
-        FOREIGN KEY (carrera_id) REFERENCES Carreras(carrera_id)
-    );
+        CREATE OR REPLACE FUNCTION DATEDIFF(unit TEXT, d1 TIMESTAMP, d2 TIMESTAMP) 
+        RETURNS INTEGER AS $$
+        BEGIN
+            RETURN (d2::date - d1::date);
+        END;
+        $$ LANGUAGE plpgsql;
+    """)
 
-    CREATE TABLE IF NOT EXISTS Libros (
-        libro_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        titulo TEXT NOT NULL,
-        autor TEXT NOT NULL,
-        editorial TEXT,
-        anio_publicacion INTEGER,
-        isbn TEXT,
-        tipo_recurso TEXT DEFAULT 'HIBRIDO',
-        archivo_pdf_url TEXT,
-        descripcion TEXT
-    );
+    # 2. Creación de tablas
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS Carreras (
+            carrera_id SERIAL PRIMARY KEY,
+            nombre VARCHAR(120) NOT NULL,
+            codigo VARCHAR(20) UNIQUE NOT NULL
+        );
 
-    CREATE TABLE IF NOT EXISTS LibroCarrera (
-        libro_id INTEGER NOT NULL,
-        carrera_id INTEGER NOT NULL,
-        PRIMARY KEY (libro_id, carrera_id)
-    );
+        CREATE TABLE IF NOT EXISTS Usuarios (
+            usuario_id SERIAL PRIMARY KEY,
+            dni VARCHAR(15) UNIQUE NOT NULL,
+            nombres VARCHAR(100) NOT NULL,
+            apellidos VARCHAR(100) NOT NULL,
+            password_hash VARCHAR(255) NOT NULL,
+            rol VARCHAR(20) NOT NULL DEFAULT 'ALUMNO',
+            carrera_id INTEGER REFERENCES Carreras(carrera_id) ON DELETE SET NULL,
+            ciclo INTEGER DEFAULT 1,
+            estado VARCHAR(20) DEFAULT 'ACTIVO'
+        );
 
-    CREATE TABLE IF NOT EXISTS Ejemplares (
-        ejemplar_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        libro_id INTEGER NOT NULL,
-        codigo_patrimonio TEXT UNIQUE NOT NULL,
-        estado_fisico TEXT DEFAULT 'DISPONIBLE',
-        ubicacion_estante TEXT DEFAULT 'Estante 1-A'
-    );
+        CREATE TABLE IF NOT EXISTS Libros (
+            libro_id SERIAL PRIMARY KEY,
+            titulo VARCHAR(255) NOT NULL,
+            autor VARCHAR(200) NOT NULL,
+            editorial VARCHAR(150),
+            anio_publicacion INTEGER,
+            isbn VARCHAR(50),
+            tipo_recurso VARCHAR(20) DEFAULT 'HIBRIDO',
+            archivo_pdf_url VARCHAR(255),
+            descripcion TEXT
+        );
 
-    CREATE TABLE IF NOT EXISTS Prestamos (
-        prestamo_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        usuario_id INTEGER NOT NULL,
-        ejemplar_id INTEGER NOT NULL,
-        fecha_prestamo TEXT NOT NULL,
-        fecha_devolucion_prevista TEXT NOT NULL,
-        fecha_devolucion_real TEXT,
-        estado TEXT DEFAULT 'ACTIVO',
-        carnet_custodia INTEGER DEFAULT 1,
-        observaciones TEXT
-    );
+        CREATE TABLE IF NOT EXISTS LibroCarrera (
+            libro_id INTEGER REFERENCES Libros(libro_id) ON DELETE CASCADE,
+            carrera_id INTEGER REFERENCES Carreras(carrera_id) ON DELETE CASCADE,
+            PRIMARY KEY (libro_id, carrera_id)
+        );
 
-    CREATE TABLE IF NOT EXISTS AccesosDigitales (
-        acceso_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        usuario_id INTEGER NOT NULL,
-        libro_id INTEGER NOT NULL,
-        fecha_acceso TEXT NOT NULL,
-        direccion_ip TEXT DEFAULT '127.0.0.1'
-    );
-    ''')
+        CREATE TABLE IF NOT EXISTS Ejemplares (
+            ejemplar_id SERIAL PRIMARY KEY,
+            libro_id INTEGER REFERENCES Libros(libro_id) ON DELETE CASCADE,
+            codigo_patrimonio VARCHAR(50) UNIQUE NOT NULL,
+            estado_fisico VARCHAR(30) DEFAULT 'DISPONIBLE',
+            ubicacion_estante VARCHAR(100) DEFAULT 'Estante 1-A'
+        );
 
-    # Carreras
+        CREATE TABLE IF NOT EXISTS Prestamos (
+            prestamo_id SERIAL PRIMARY KEY,
+            usuario_id INTEGER REFERENCES Usuarios(usuario_id) ON DELETE CASCADE,
+            ejemplar_id INTEGER REFERENCES Ejemplares(ejemplar_id) ON DELETE CASCADE,
+            fecha_prestamo TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            fecha_devolucion_prevista TIMESTAMP NOT NULL,
+            fecha_devolucion_real TIMESTAMP,
+            estado VARCHAR(20) DEFAULT 'ACTIVO',
+            carnet_custodia INTEGER DEFAULT 1,
+            observaciones VARCHAR(255)
+        );
+
+        CREATE TABLE IF NOT EXISTS AccesosDigitales (
+            acceso_id SERIAL PRIMARY KEY,
+            usuario_id INTEGER REFERENCES Usuarios(usuario_id) ON DELETE CASCADE,
+            libro_id INTEGER REFERENCES Libros(libro_id) ON DELETE CASCADE,
+            fecha_acceso TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            direccion_ip VARCHAR(50) DEFAULT '127.0.0.1'
+        );
+    """)
+
+    # 3. Precarga inicial de Carreras si está vacía
     cur.execute("SELECT COUNT(*) FROM Carreras")
     if cur.fetchone()[0] == 0:
-        cur.executemany("INSERT INTO Carreras (carrera_id, nombre, codigo) VALUES (?, ?, ?)", [
-            (1, 'Arquitectura de Plataformas y TI (APSTI)', 'APSTI'),
-            (2, 'Enfermería Técnica', 'ENF'),
-            (3, 'Producción Agropecuaria', 'AGRO'),
-            (4, 'Contabilidad', 'CONT')
+        cur.executemany("INSERT INTO Carreras (nombre, codigo) VALUES (%s, %s)", [
+            ('Arquitectura de Plataformas y TI (APSTI)', 'APSTI'),
+            ('Enfermería Técnica', 'ENF'),
+            ('Producción Agropecuaria', 'AGRO'),
+            ('Contabilidad', 'CONT')
         ])
 
-    # Usuarios
-    cur.execute("SELECT COUNT(*) FROM Usuarios WHERE dni = 'admin'")
-    if cur.fetchone()[0] == 0:
-        cur.executemany("INSERT INTO Usuarios (dni, nombres, apellidos, password_hash, rol, carrera_id, ciclo, estado) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [
+        cur.executemany("INSERT INTO Usuarios (dni, nombres, apellidos, password_hash, rol, carrera_id, ciclo, estado) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)", [
             ('admin', 'Administrador', 'Biblioteca Central', 'admin123', 'ADMIN', 1, 6, 'ACTIVO'),
             ('74859612', 'Marlo', 'Vilchez Cuzque', '74859612', 'ALUMNO', 1, 6, 'ACTIVO'),
             ('71234567', 'Rosa María', 'Díaz López', '71234567', 'ALUMNO', 2, 4, 'ACTIVO'),
@@ -252,22 +234,16 @@ def seed_cloud_database(conn):
             ('73456789', 'Ana Lucía', 'Pérez Torres', '73456789', 'ALUMNO', 4, 5, 'ACTIVO')
         ])
 
-    # Libros
-    cur.execute("SELECT COUNT(*) FROM Libros")
-    if cur.fetchone()[0] == 0:
-        cur.executemany("INSERT INTO Libros (libro_id, titulo, autor, editorial, anio_publicacion, tipo_recurso, archivo_pdf_url, descripcion) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [
-            (1, 'Redes y Conectividad de Datos', 'Andrew S. Tanenbaum', 'Pearson', 2021, 'HIBRIDO', 'redes_datos.pdf', 'Topologías, protocolos TCP/IP y diseño de redes corporativas.'),
-            (2, 'Desarrollo Web con Python y Flask', 'Miguel Grinberg', 'O Reilly', 2023, 'HIBRIDO', 'python_flask.pdf', 'Arquitectura MVC, APIs REST y plantillas Jinja2.'),
-            (3, 'Manual de Primeros Auxilios y Soporte Básico', 'Cruz Roja Internacional', 'Médica Panamericana', 2022, 'HIBRIDO', 'primeros_auxilios.pdf', 'Protocolos de atención inicial y evaluación de signos vitales.'),
-            (4, 'Farmacología Básica y Clínica', 'Bertram G. Katzung', 'McGraw-Hill', 2021, 'FISICO', None, 'Clasificación de fármacos, dosis terapéuticas y farmacovigilancia.'),
-            (5, 'Manejo Agroecológico de Suelos y Cultivos', 'Miguel A. Altieri', 'Mundiprensa', 2022, 'HIBRIDO', 'manejo_suelos.pdf', 'Fertilidad del suelo, rotación de cultivos y control biológico.'),
-            (6, 'Contabilidad Financiera y Tributaria', 'Erick Valdivia', 'Instituto Pacífico', 2023, 'HIBRIDO', 'contabilidad_tributaria.pdf', 'Normas NIIF, asientos contables y obligaciones fiscales Sunat.')
+        cur.executemany("INSERT INTO Libros (titulo, autor, editorial, anio_publicacion, tipo_recurso, archivo_pdf_url, descripcion) VALUES (%s, %s, %s, %s, %s, %s, %s)", [
+            ('Redes y Conectividad de Datos', 'Andrew S. Tanenbaum', 'Pearson', 2021, 'HIBRIDO', 'redes_datos.pdf', 'Topologías, protocolos TCP/IP y diseño de redes corporativas.'),
+            ('Desarrollo Web con Python y Flask', 'Miguel Grinberg', 'O Reilly', 2023, 'HIBRIDO', 'python_flask.pdf', 'Arquitectura MVC, APIs REST y plantillas Jinja2.'),
+            ('Manual de Primeros Auxilios y Soporte Básico', 'Cruz Roja Internacional', 'Médica Panamericana', 2022, 'HIBRIDO', 'primeros_auxilios.pdf', 'Protocolos de atención inicial y evaluación de signos vitales.'),
+            ('Farmacología Básica y Clínica', 'Bertram G. Katzung', 'McGraw-Hill', 2021, 'FISICO', None, 'Clasificación de fármacos, dosis terapéuticas y farmacovigilancia.'),
+            ('Manejo Agroecológico de Suelos y Cultivos', 'Miguel A. Altieri', 'Mundiprensa', 2022, 'HIBRIDO', 'manejo_suelos.pdf', 'Fertilidad del suelo, rotación de cultivos y control biológico.'),
+            ('Contabilidad Financiera y Tributaria', 'Erick Valdivia', 'Instituto Pacífico', 2023, 'HIBRIDO', 'contabilidad_tributaria.pdf', 'Normas NIIF, asientos contables y obligaciones fiscales Sunat.')
         ])
 
-    # LibroCarrera
-    cur.execute("SELECT COUNT(*) FROM LibroCarrera")
-    if cur.fetchone()[0] == 0:
-        cur.executemany("INSERT INTO LibroCarrera (libro_id, carrera_id) VALUES (?, ?)", [
+        cur.executemany("INSERT INTO LibroCarrera (libro_id, carrera_id) VALUES (%s, %s)", [
             (1, 1),
             (2, 1),
             (3, 2),
@@ -276,10 +252,7 @@ def seed_cloud_database(conn):
             (6, 4)
         ])
 
-    # Ejemplares
-    cur.execute("SELECT COUNT(*) FROM Ejemplares")
-    if cur.fetchone()[0] == 0:
-        cur.executemany("INSERT INTO Ejemplares (libro_id, codigo_patrimonio, estado_fisico, ubicacion_estante) VALUES (?, ?, ?, ?)", [
+        cur.executemany("INSERT INTO Ejemplares (libro_id, codigo_patrimonio, estado_fisico, ubicacion_estante) VALUES (%s, %s, %s, %s)", [
             (1, 'APSTI-001-A', 'DISPONIBLE', 'Estante 1-A'),
             (1, 'APSTI-001-B', 'DISPONIBLE', 'Estante 1-A'),
             (2, 'APSTI-002-A', 'DISPONIBLE', 'Estante 1-B'),
@@ -289,20 +262,13 @@ def seed_cloud_database(conn):
             (6, 'CONT-001-A', 'DISPONIBLE', 'Estante 4-A')
         ])
 
-    # Préstamos de prueba
-    cur.execute("SELECT COUNT(*) FROM Prestamos")
-    if cur.fetchone()[0] == 0:
-        cur.execute("""
-            INSERT INTO Prestamos (usuario_id, ejemplar_id, fecha_prestamo, fecha_devolucion_prevista, estado, carnet_custodia, observaciones)
-            VALUES (2, 2, '2026-10-25 09:30:00', '2026-11-01 18:00:00', 'ACTIVO', 1, 'Carnet físico en custodia.')
-        """)
-
     conn.commit()
 
 # ==========================================
 # CONEXIÓN PRINCIPAL
 # ==========================================
 def get_db_connection():
+    # 1. En Windows local: usa SQL Server EQUIPO si existe
     if sys.platform.startswith('win'):
         try:
             import pyodbc
@@ -316,13 +282,27 @@ def get_db_connection():
         except Exception:
             pass
 
-    conn = sqlite3.connect(DB_SQLITE_PATH, check_same_thread=False)
-    conn.row_factory = UniversalRow
-    conn.create_function("GETDATE", 0, lambda: datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-    conn.create_function("DATEDIFF", 3, sqlite_datediff)
-    conn.create_function("ISNULL", 2, lambda a, b: b if a is None else a)
-    seed_cloud_database(conn)
-    return CompatConnection(conn)
+    # 2. En Render (Linux en la nube): conecta a Supabase PostgreSQL
+    import psycopg2
+    configs = [
+        # Opción A: Directo
+        {"host": "db.eolwyomlogeobdvkrgmw.supabase.co", "port": 5432, "user": "postgres", "password": "Utcubamba2026*", "dbname": "postgres", "sslmode": "require"},
+        # Opción B: Pooler IPv4
+        {"host": "aws-0-sa-east-1.pooler.supabase.com", "port": 5432, "user": "postgres.eolwyomlogeobdvkrgmw", "password": "Utcubamba2026*", "dbname": "postgres", "sslmode": "require"},
+        {"host": "aws-0-us-east-1.pooler.supabase.com", "port": 5432, "user": "postgres.eolwyomlogeobdvkrgmw", "password": "Utcubamba2026*", "dbname": "postgres", "sslmode": "require"}
+    ]
+    
+    last_err = None
+    for cfg in configs:
+        try:
+            conn = psycopg2.connect(**cfg, connect_timeout=8)
+            init_supabase_tables(conn)
+            return CompatConnection(conn)
+        except Exception as e:
+            last_err = e
+            continue
+
+    raise last_err
 
 def get_connection():
     return get_db_connection()

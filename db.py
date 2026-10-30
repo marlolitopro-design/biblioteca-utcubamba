@@ -1,7 +1,20 @@
 import os
 import sys
 import re
+import subprocess
 from datetime import datetime
+
+# ==========================================
+# AUTO-INSTALACIÓN AUTOMÁTICA DE PSYCOPG2
+# ==========================================
+try:
+    import psycopg2
+except ImportError:
+    try:
+        subprocess.run([sys.executable, "-m", "pip", "install", "psycopg2-binary"], check=False)
+        import psycopg2
+    except Exception:
+        pass
 
 # ==========================================
 # TRADUCTOR SQL SERVER -> POSTGRESQL / SQLITE
@@ -294,6 +307,13 @@ def get_db_connection():
 
     # 2. Conexión oficial a Supabase PostgreSQL (IPv4 Session Pooler)
     try:
+        global psycopg2
+        if 'psycopg2' not in sys.modules:
+            try:
+                subprocess.run([sys.executable, "-m", "pip", "install", "psycopg2-binary"], check=False)
+                import psycopg2
+            except Exception:
+                pass
         import psycopg2
         conn = psycopg2.connect(
             host="aws-0-us-east-2.pooler.supabase.com",
@@ -308,9 +328,9 @@ def get_db_connection():
         seed_database(conn, True)
         return CompatConnection(conn, True)
     except Exception as e:
-        print(f"Error conectando a Supabase: {e}")
+        print(f"Aviso Supabase: {e}")
 
-    # 3. Respaldo local SQLite auto-inicializado garantizado
+    # 3. Respaldo local SQLite auto-inicializado
     import sqlite3
     db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'biblioteca_cloud.db')
     conn = sqlite3.connect(db_path, check_same_thread=False)

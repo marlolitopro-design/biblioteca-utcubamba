@@ -118,10 +118,8 @@
                                 <span class="badge bg-secondary-subtle text-secondary border">Solo Digital</span>
                             {% endif %}
                         </td>
-                        <!-- Celda de acciones con alineación horizontal fija y sin salto de línea -->
                         <td class="text-end pe-4 text-nowrap" style="width: 250px;">
                             <div class="d-inline-flex align-items-center justify-content-end gap-1">
-                                <!-- Botón Gestionar Copias y Estantes (solo si tiene parte física) -->
                                 {% if l.tipo_recurso in ['FISICO', 'HIBRIDO'] %}
                                 <button class="btn btn-outline-primary btn-sm" 
                                         data-bs-toggle="modal" 
@@ -131,7 +129,7 @@
                                 </button>
                                 {% endif %}
 
-                                <!-- Botón Editar Libro -->
+                                <!-- Botón Editar Libro con atributo data-portada -->
                                 <button class="btn btn-outline-secondary btn-sm"
                                         data-bs-toggle="modal"
                                         data-bs-target="#modalEditarLibro"
@@ -142,13 +140,13 @@
                                         data-anio="{{ l.anio_publicacion or '' }}"
                                         data-tipo="{{ l.tipo_recurso }}"
                                         data-pdf="{{ l.archivo_pdf_url or '' }}"
+                                        data-portada="{{ l.portada_url or '' }}"
                                         data-descripcion="{{ l.descripcion or '' }}"
                                         data-carreras="{{ l.carreras_ids|join(',') }}"
                                         title="Editar datos del libro">
                                     <i class="bi bi-pencil-square"></i>
                                 </button>
 
-                                <!-- Botón Eliminar Libro -->
                                 <form method="POST" action="/admin/libros/eliminar/{{ l.libro_id }}" class="d-inline m-0 p-0" onsubmit="return confirm('¿Está seguro de eliminar este libro y sus copias del inventario?');">
                                     <button type="submit" class="btn btn-outline-danger btn-sm" title="Eliminar libro">
                                         <i class="bi bi-trash"></i>
@@ -170,7 +168,7 @@
     </div>
 </div>
 
-<!-- MODALES DE GESTIÓN DE COPIAS Y ESTANTES POR CADA LIBRO -->
+<!-- MODALES DE COPIAS Y ESTANTES -->
 {% for l in libros %}
 {% if l.tipo_recurso in ['FISICO', 'HIBRIDO'] %}
 <div class="modal fade" id="modalCopias_{{ l.libro_id }}" tabindex="-1" aria-hidden="true">
@@ -316,7 +314,14 @@
                     <div class="mb-3" id="campo_pdf" style="display: none;">
                         <label class="form-label small fw-semibold text-secondary">Nombre de archivo PDF (en static/uploads/)</label>
                         <input type="text" name="archivo_pdf_url" class="form-control" placeholder="Ej. manual_enfermeria_2024.pdf">
-                        <small class="text-muted" style="font-size: 0.78rem;">Coloca aquí el nombre del archivo PDF ubicado en la carpeta uploads.</small>
+                        <small class="text-muted" style="font-size: 0.78rem;">Nombre del archivo PDF ubicado en la carpeta uploads.</small>
+                    </div>
+
+                    <!-- Casilla de Carátula para Nuevo Libro -->
+                    <div class="mb-3" id="campo_portada" style="display: none;">
+                        <label class="form-label small fw-semibold text-secondary">Foto de Carátula (en static/uploads/)</label>
+                        <input type="text" name="portada_url" class="form-control" placeholder="Ej. bovinos.png">
+                        <small class="text-muted" style="font-size: 0.78rem;">Nombre del archivo de imagen subido a uploads (opcional).</small>
                     </div>
 
                     <div class="mb-3">
@@ -391,6 +396,13 @@
                         <input type="text" name="archivo_pdf_url" id="edit_libro_pdf" class="form-control" placeholder="Ej. manual_cacao_cafe.pdf">
                     </div>
 
+                    <!-- Casilla de Carátula para Editar Libro -->
+                    <div class="mb-3" id="edit_campo_portada">
+                        <label class="form-label small fw-semibold text-secondary">Foto de Carátula (en static/uploads/)</label>
+                        <input type="text" name="portada_url" id="edit_libro_portada" class="form-control" placeholder="Ej. bovinos.png">
+                        <small class="text-muted" style="font-size: 0.78rem;">Nombre del archivo de imagen subido a uploads (opcional).</small>
+                    </div>
+
                     <div class="mb-3">
                         <label class="form-label small fw-semibold text-secondary d-block">Carreras a las que aplica:</label>
                         <div class="d-flex gap-3 flex-wrap">
@@ -422,17 +434,25 @@
 <script>
     const selTipo = document.getElementById('select_tipo_recurso');
     const campoPdf = document.getElementById('campo_pdf');
+    const campoPortada = document.getElementById('campo_portada');
+
     if (selTipo) {
         selTipo.addEventListener('change', function() {
-            campoPdf.style.display = (this.value === 'DIGITAL' || this.value === 'HIBRIDO') ? 'block' : 'none';
+            const esDigital = (this.value === 'DIGITAL' || this.value === 'HIBRIDO');
+            campoPdf.style.display = esDigital ? 'block' : 'none';
+            campoPortada.style.display = esDigital ? 'block' : 'none';
         });
     }
 
     const selEditTipo = document.getElementById('edit_libro_tipo');
     const editCampoPdf = document.getElementById('edit_campo_pdf');
+    const editCampoPortada = document.getElementById('edit_campo_portada');
+
     if (selEditTipo) {
         selEditTipo.addEventListener('change', function() {
-            editCampoPdf.style.display = (this.value === 'DIGITAL' || this.value === 'HIBRIDO') ? 'block' : 'none';
+            const esDigital = (this.value === 'DIGITAL' || this.value === 'HIBRIDO');
+            editCampoPdf.style.display = esDigital ? 'block' : 'none';
+            editCampoPortada.style.display = esDigital ? 'block' : 'none';
         });
     }
 
@@ -452,9 +472,12 @@
             document.getElementById('edit_libro_anio').value = btn.getAttribute('data-anio');
             document.getElementById('edit_libro_tipo').value = tipo;
             document.getElementById('edit_libro_pdf').value = btn.getAttribute('data-pdf');
+            document.getElementById('edit_libro_portada').value = btn.getAttribute('data-portada') || '';
             document.getElementById('edit_libro_descripcion').value = btn.getAttribute('data-descripcion');
 
-            editCampoPdf.style.display = (tipo === 'DIGITAL' || tipo === 'HIBRIDO') ? 'block' : 'none';
+            const esDigital = (tipo === 'DIGITAL' || tipo === 'HIBRIDO');
+            editCampoPdf.style.display = esDigital ? 'block' : 'none';
+            editCampoPortada.style.display = esDigital ? 'block' : 'none';
 
             document.querySelectorAll('.chk-edit-carrera').forEach(chk => {
                 chk.checked = carrerasArr.includes(chk.value);

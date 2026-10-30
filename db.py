@@ -258,7 +258,7 @@ def seed_database(conn, is_postgres=True):
             ('Farmacología Básica y Clínica', 'Bertram G. Katzung', 'McGraw-Hill', 2021, 'FISICO', None, 'Clasificación de fármacos, dosis terapéuticas y farmacovigilancia.', None),
             ('Manejo Agroecológico de Suelos y Cultivos', 'Miguel A. Altieri', 'Mundiprensa', 2022, 'HIBRIDO', 'manejo_suelos.pdf', 'Fertilidad del suelo, rotación de cultivos y control biológico.', None),
             ('Contabilidad Financiera y Tributaria', 'Erick Valdivia', 'Instituto Pacífico', 2023, 'HIBRIDO', 'contabilidad_tributaria.pdf', 'Normas NIIF, asientos contables y obligaciones fiscales Sunat.', None),
-            ('Alimentación de ganado bovino con dietas altas en grano', 'Germán David Mendoza Martínez', 'UAM Xochimilco', 2016, 'HIBRIDO', 'Alimentacion-de-ganado-bovino-con-dietas-altas-en-grano.pdf', 'Manual técnico de nutrición animal, fisiología ruminal y engorde intensivo en corral.', 'bovinos_grano.jpg')
+            ('Alimentación de ganado bovino con dietas altas en grano', 'Germán David Mendoza Martínez', 'UAM Xochimilco', 2016, 'HIBRIDO', 'Alimentacion-de-ganado-bovino-con-dietas-altas-en-grano.pdf', 'Manual técnico de nutrición animal, fisiología ruminal y engorde intensivo en corral.', 'bovinos.png')
         ])
 
         cur.executemany(f"INSERT INTO LibroCarrera (libro_id, carrera_id) VALUES ({ph}, {ph})", [

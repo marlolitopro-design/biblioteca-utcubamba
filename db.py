@@ -82,13 +82,17 @@ class CompatCursor:
     def __init__(self, cur):
         self._cur = cur
 
-    def execute(self, sql, params=()):
+    def execute(self, sql, params=None):
         sql_clean = clean_sql_for_postgres(sql)
-        return self._cur.execute(sql_clean, params)
+        if params is None or len(params) == 0:
+            return self._cur.execute(sql_clean)
+        return self._cur.execute(sql_clean, tuple(params))
 
     def executemany(self, sql, seq):
         sql_clean = clean_sql_for_postgres(sql)
-        return self._cur.executemany(sql_clean, seq)
+        if not seq:
+            return
+        return self._cur.executemany(sql_clean, [tuple(x) for x in seq])
 
     def fetchone(self):
         row = self._cur.fetchone()
@@ -130,7 +134,12 @@ class CompatConnection:
 # ==========================================
 # AUTO-CREACIÓN DE TABLAS EN SUPABASE
 # ==========================================
+_tables_initialized = False
+
 def init_supabase_tables(conn):
+    global _tables_initialized
+    if _tables_initialized:
+        return
     cur = conn.cursor()
     # 1. Funciones auxiliares compatibles
     cur.execute("""
@@ -216,7 +225,7 @@ def init_supabase_tables(conn):
         );
     """)
 
-    # 3. Precarga inicial de Carreras si está vacía
+    # 3. Precarga inicial si está vacía
     cur.execute("SELECT COUNT(*) FROM Carreras")
     if cur.fetchone()[0] == 0:
         cur.executemany("INSERT INTO Carreras (nombre, codigo) VALUES (%s, %s)", [
@@ -263,12 +272,12 @@ def init_supabase_tables(conn):
         ])
 
     conn.commit()
+    _tables_initialized = True
 
 # ==========================================
 # CONEXIÓN PRINCIPAL
 # ==========================================
 def get_db_connection():
-    # 1. En Windows local: usa SQL Server EQUIPO si existe
     if sys.platform.startswith('win'):
         try:
             import pyodbc
@@ -282,14 +291,13 @@ def get_db_connection():
         except Exception:
             pass
 
-    # 2. En Render (Linux en la nube): conecta a Supabase PostgreSQL
     import psycopg2
     configs = [
-        # Opción A: Directo
-        {"host": "db.eolwyomlogeobdvkrgmw.supabase.co", "port": 5432, "user": "postgres", "password": "Utcubamba2026*", "dbname": "postgres", "sslmode": "require"},
-        # Opción B: Pooler IPv4
+        # Opción 1: Pooler IPv4
         {"host": "aws-0-sa-east-1.pooler.supabase.com", "port": 5432, "user": "postgres.eolwyomlogeobdvkrgmw", "password": "Utcubamba2026*", "dbname": "postgres", "sslmode": "require"},
-        {"host": "aws-0-us-east-1.pooler.supabase.com", "port": 5432, "user": "postgres.eolwyomlogeobdvkrgmw", "password": "Utcubamba2026*", "dbname": "postgres", "sslmode": "require"}
+        {"host": "aws-0-us-east-1.pooler.supabase.com", "port": 5432, "user": "postgres.eolwyomlogeobdvkrgmw", "password": "Utcubamba2026*", "dbname": "postgres", "sslmode": "require"},
+        # Opción 2: Directo
+        {"host": "db.eolwyomlogeobdvkrgmw.supabase.co", "port": 5432, "user": "postgres", "password": "Utcubamba2026*", "dbname": "postgres", "sslmode": "require"}
     ]
     
     last_err = None

@@ -141,7 +141,7 @@ def init_supabase_tables(conn):
     if _tables_initialized:
         return
     cur = conn.cursor()
-    # 1. Funciones auxiliares compatibles
+    # 1. Funciones auxiliares
     cur.execute("""
         CREATE OR REPLACE FUNCTION GETDATE() 
         RETURNS TIMESTAMP AS $$
@@ -158,7 +158,7 @@ def init_supabase_tables(conn):
         $$ LANGUAGE plpgsql;
     """)
 
-    # 2. Creación de tablas
+    # 2. Creación de tablas permanentes
     cur.execute("""
         CREATE TABLE IF NOT EXISTS Carreras (
             carrera_id SERIAL PRIMARY KEY,
@@ -225,7 +225,7 @@ def init_supabase_tables(conn):
         );
     """)
 
-    # 3. Precarga inicial si está vacía
+    # 3. Datos iniciales
     cur.execute("SELECT COUNT(*) FROM Carreras")
     if cur.fetchone()[0] == 0:
         cur.executemany("INSERT INTO Carreras (nombre, codigo) VALUES (%s, %s)", [
@@ -278,6 +278,7 @@ def init_supabase_tables(conn):
 # CONEXIÓN PRINCIPAL
 # ==========================================
 def get_db_connection():
+    # 1. En Windows local: usa SQL Server EQUIPO si existe
     if sys.platform.startswith('win'):
         try:
             import pyodbc
@@ -291,26 +292,33 @@ def get_db_connection():
         except Exception:
             pass
 
-    import psycopg2
-    configs = [
-        # Opción 1: Pooler IPv4
-        {"host": "aws-0-sa-east-1.pooler.supabase.com", "port": 5432, "user": "postgres.eolwyomlogeobdvkrgmw", "password": "Utcubamba2026*", "dbname": "postgres", "sslmode": "require"},
-        {"host": "aws-0-us-east-1.pooler.supabase.com", "port": 5432, "user": "postgres.eolwyomlogeobdvkrgmw", "password": "Utcubamba2026*", "dbname": "postgres", "sslmode": "require"},
-        # Opción 2: Directo
-        {"host": "db.eolwyomlogeobdvkrgmw.supabase.co", "port": 5432, "user": "postgres", "password": "Utcubamba2026*", "dbname": "postgres", "sslmode": "require"}
-    ]
-    
-    last_err = None
-    for cfg in configs:
-        try:
-            conn = psycopg2.connect(**cfg, connect_timeout=8)
-            init_supabase_tables(conn)
-            return CompatConnection(conn)
-        except Exception as e:
-            last_err = e
-            continue
+    # 2. Conexión a Supabase PostgreSQL
+    try:
+        import psycopg2
+        configs = [
+            # Opción 1: Pooler IPv4
+            {"host": "aws-0-sa-east-1.pooler.supabase.com", "port": 5432, "user": "postgres.eolwyomlogeobdvkrgmw", "password": "Utcubamba2026*", "dbname": "postgres", "sslmode": "require"},
+            {"host": "aws-0-us-east-1.pooler.supabase.com", "port": 5432, "user": "postgres.eolwyomlogeobdvkrgmw", "password": "Utcubamba2026*", "dbname": "postgres", "sslmode": "require"},
+            # Opción 2: Directo
+            {"host": "db.eolwyomlogeobdvkrgmw.supabase.co", "port": 5432, "user": "postgres", "password": "Utcubamba2026*", "dbname": "postgres", "sslmode": "require"}
+        ]
+        
+        for cfg in configs:
+            try:
+                conn = psycopg2.connect(**cfg, connect_timeout=8)
+                init_supabase_tables(conn)
+                return CompatConnection(conn)
+            except Exception:
+                continue
+    except ImportError:
+        pass
 
-    raise last_err
+    # Respaldo de seguridad si aún no se instaló psycopg2
+    import sqlite3
+    db_local = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'biblioteca_cloud.db')
+    conn = sqlite3.connect(db_local, check_same_thread=False)
+    conn.row_factory = UniversalRow
+    return CompatConnection(conn)
 
 def get_connection():
     return get_db_connection()

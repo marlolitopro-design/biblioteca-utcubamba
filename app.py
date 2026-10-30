@@ -741,7 +741,8 @@ def listar_libros():
                CAST(l.descripcion AS VARCHAR(MAX)) as descripcion,
                (SELECT COUNT(*) FROM Ejemplares e WHERE e.libro_id = l.libro_id AND e.estado_fisico != 'BAJA') as total_copias,
                (SELECT COUNT(*) FROM Ejemplares e WHERE e.libro_id = l.libro_id AND e.estado_fisico = 'DISPONIBLE') as disponibles,
-               (SELECT TOP 1 e.ubicacion_estante FROM Ejemplares e WHERE e.libro_id = l.libro_id AND e.estado_fisico != 'BAJA') as estante_principal
+               (SELECT TOP 1 e.ubicacion_estante FROM Ejemplares e WHERE e.libro_id = l.libro_id AND e.estado_fisico != 'BAJA') as estante_principal,
+               l.portada_url
         FROM Libros l
         ORDER BY l.titulo ASC
     """)
@@ -776,7 +777,9 @@ def listar_libros():
             'libro_id': f[0], 'titulo': f[1], 'autor': f[2], 'editorial': f[3],
             'anio_publicacion': f[4], 'tipo_recurso': f[5], 'archivo_pdf_url': f[6],
             'descripcion': f[7], 'total_copias': f[8], 'disponibles': f[9],
-            'estante_principal': f[10], 'carreras_codigos': carreras_codigos,
+            'estante_principal': f[10],
+            'portada_url': f[11] if len(f) > 11 and f[11] else None,
+            'carreras_codigos': carreras_codigos,
             'carreras_ids': carreras_ids, 'ejemplares_lista': ejemplares_lista
         })
 
@@ -808,6 +811,7 @@ def crear_libro():
     anio = request.form.get('anio_publicacion') or None
     tipo_recurso = request.form.get('tipo_recurso')
     archivo_pdf = request.form.get('archivo_pdf_url', '').strip() or None
+    portada = request.form.get('portada_url', '').strip() or None
     descripcion = request.form.get('descripcion', '').strip()
     carreras_seleccionadas = request.form.getlist('carreras')
 
@@ -819,10 +823,10 @@ def crear_libro():
     cursor = conn.cursor()
 
     cursor.execute("""
-        INSERT INTO Libros (titulo, autor, editorial, anio_publicacion, tipo_recurso, archivo_pdf_url, descripcion)
+        INSERT INTO Libros (titulo, autor, editorial, anio_publicacion, tipo_recurso, archivo_pdf_url, descripcion, portada_url)
         OUTPUT INSERTED.libro_id
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (titulo, autor, editorial, anio, tipo_recurso, archivo_pdf, descripcion))
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (titulo, autor, editorial, anio, tipo_recurso, archivo_pdf, descripcion, portada))
     libro_id = cursor.fetchone()[0]
 
     for cid in carreras_seleccionadas:
@@ -845,6 +849,7 @@ def editar_libro(libro_id):
     anio = request.form.get('anio_publicacion') or None
     tipo_recurso = request.form.get('tipo_recurso')
     archivo_pdf = request.form.get('archivo_pdf_url', '').strip() or None
+    portada = request.form.get('portada_url', '').strip() or None
     descripcion = request.form.get('descripcion', '').strip()
     carreras_seleccionadas = request.form.getlist('carreras')
 
@@ -854,9 +859,9 @@ def editar_libro(libro_id):
     cursor.execute("""
         UPDATE Libros
         SET titulo = ?, autor = ?, editorial = ?, anio_publicacion = ?,
-            tipo_recurso = ?, archivo_pdf_url = ?, descripcion = ?
+            tipo_recurso = ?, archivo_pdf_url = ?, descripcion = ?, portada_url = ?
         WHERE libro_id = ?
-    """, (titulo, autor, editorial, anio, tipo_recurso, archivo_pdf, descripcion, libro_id))
+    """, (titulo, autor, editorial, anio, tipo_recurso, archivo_pdf, descripcion, portada, libro_id))
 
     cursor.execute("DELETE FROM LibroCarrera WHERE libro_id = ?", (libro_id,))
     for cid in carreras_seleccionadas:

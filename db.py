@@ -1,20 +1,7 @@
 import os
 import sys
 import re
-import subprocess
 from datetime import datetime
-
-# ==========================================
-# AUTO-INSTALACIÓN AUTOMÁTICA DE PSYCOPG2
-# ==========================================
-try:
-    import psycopg2
-except ImportError:
-    try:
-        subprocess.run([sys.executable, "-m", "pip", "install", "psycopg2-binary"], check=False)
-        import psycopg2
-    except Exception:
-        pass
 
 # ==========================================
 # TRADUCTOR SQL SERVER -> POSTGRESQL / SQLITE
@@ -126,10 +113,6 @@ class CompatCursor:
         return self._cur.executemany(sql_clean, seq)
 
     def fetchone(self):
-        if self._inserted_id is not None:
-            val = self._inserted_id
-            self._inserted_id = None
-            return val
         row = self._cur.fetchone()
         return UniversalRow(self._cur, row) if row else None
 
@@ -207,7 +190,8 @@ def seed_database(conn, is_postgres=True):
             isbn VARCHAR(50),
             tipo_recurso VARCHAR(20) DEFAULT 'HIBRIDO',
             archivo_pdf_url VARCHAR(255),
-            descripcion TEXT
+            descripcion TEXT,
+            portada_url VARCHAR(255)
         );
         CREATE TABLE IF NOT EXISTS LibroCarrera (
             libro_id INTEGER NOT NULL,
@@ -243,6 +227,7 @@ def seed_database(conn, is_postgres=True):
 
     if is_postgres:
         cur.execute(schema_sql)
+        cur.execute("ALTER TABLE Libros ADD COLUMN IF NOT EXISTS portada_url VARCHAR(255);")
     else:
         conn.executescript(schema_sql)
 
@@ -265,18 +250,19 @@ def seed_database(conn, is_postgres=True):
             ('73456789', 'Ana Lucía', 'Pérez Torres', '73456789', 'ALUMNO', 4, 5, 'ACTIVO')
         ])
 
-        ph7 = ", ".join([ph]*7)
-        cur.executemany(f"INSERT INTO Libros (titulo, autor, editorial, anio_publicacion, tipo_recurso, archivo_pdf_url, descripcion) VALUES ({ph7})", [
-            ('Redes y Conectividad de Datos', 'Andrew S. Tanenbaum', 'Pearson', 2021, 'HIBRIDO', 'redes_datos.pdf', 'Topologías, protocolos TCP/IP y diseño de redes corporativas.'),
-            ('Desarrollo Web con Python y Flask', 'Miguel Grinberg', 'O Reilly', 2023, 'HIBRIDO', 'python_flask.pdf', 'Arquitectura MVC, APIs REST y plantillas Jinja2.'),
-            ('Manual de Primeros Auxilios y Soporte Básico', 'Cruz Roja Internacional', 'Médica Panamericana', 2022, 'HIBRIDO', 'primeros_auxilios.pdf', 'Protocolos de atención inicial y evaluación de signos vitales.'),
-            ('Farmacología Básica y Clínica', 'Bertram G. Katzung', 'McGraw-Hill', 2021, 'FISICO', None, 'Clasificación de fármacos, dosis terapéuticas y farmacovigilancia.'),
-            ('Manejo Agroecológico de Suelos y Cultivos', 'Miguel A. Altieri', 'Mundiprensa', 2022, 'HIBRIDO', 'manejo_suelos.pdf', 'Fertilidad del suelo, rotación de cultivos y control biológico.'),
-            ('Contabilidad Financiera y Tributaria', 'Erick Valdivia', 'Instituto Pacífico', 2023, 'HIBRIDO', 'contabilidad_tributaria.pdf', 'Normas NIIF, asientos contables y obligaciones fiscales Sunat.')
+        ph_l = ", ".join([ph]*8)
+        cur.executemany(f"INSERT INTO Libros (titulo, autor, editorial, anio_publicacion, tipo_recurso, archivo_pdf_url, descripcion, portada_url) VALUES ({ph_l})", [
+            ('Redes y Conectividad de Datos', 'Andrew S. Tanenbaum', 'Pearson', 2021, 'HIBRIDO', 'redes_datos.pdf', 'Topologías, protocolos TCP/IP y diseño de redes corporativas.', None),
+            ('Desarrollo Web con Python y Flask', 'Miguel Grinberg', 'O Reilly', 2023, 'HIBRIDO', 'python_flask.pdf', 'Arquitectura MVC, APIs REST y plantillas Jinja2.', None),
+            ('Manual de Primeros Auxilios y Soporte Básico', 'Cruz Roja Internacional', 'Médica Panamericana', 2022, 'HIBRIDO', 'primeros_auxilios.pdf', 'Protocolos de atención inicial y evaluación de signos vitales.', None),
+            ('Farmacología Básica y Clínica', 'Bertram G. Katzung', 'McGraw-Hill', 2021, 'FISICO', None, 'Clasificación de fármacos, dosis terapéuticas y farmacovigilancia.', None),
+            ('Manejo Agroecológico de Suelos y Cultivos', 'Miguel A. Altieri', 'Mundiprensa', 2022, 'HIBRIDO', 'manejo_suelos.pdf', 'Fertilidad del suelo, rotación de cultivos y control biológico.', None),
+            ('Contabilidad Financiera y Tributaria', 'Erick Valdivia', 'Instituto Pacífico', 2023, 'HIBRIDO', 'contabilidad_tributaria.pdf', 'Normas NIIF, asientos contables y obligaciones fiscales Sunat.', None),
+            ('Alimentación de ganado bovino con dietas altas en grano', 'Germán David Mendoza Martínez', 'UAM Xochimilco', 2016, 'HIBRIDO', 'Alimentacion-de-ganado-bovino-con-dietas-altas-en-grano.pdf', 'Manual técnico de nutrición animal, fisiología ruminal y engorde intensivo en corral.', 'bovinos_grano.jpg')
         ])
 
         cur.executemany(f"INSERT INTO LibroCarrera (libro_id, carrera_id) VALUES ({ph}, {ph})", [
-            (1, 1), (2, 1), (3, 2), (4, 2), (5, 3), (6, 4)
+            (1, 1), (2, 1), (3, 2), (4, 2), (5, 3), (6, 4), (7, 3)
         ])
 
         ph4 = ", ".join([ph]*4)
@@ -287,7 +273,8 @@ def seed_database(conn, is_postgres=True):
             (3, 'ENF-001-A', 'DISPONIBLE', 'Estante 2-A'),
             (4, 'ENF-002-A', 'DISPONIBLE', 'Estante 2-B'),
             (5, 'AGRO-001-A', 'DISPONIBLE', 'Estante 3-A'),
-            (6, 'CONT-001-A', 'DISPONIBLE', 'Estante 4-A')
+            (6, 'CONT-001-A', 'DISPONIBLE', 'Estante 4-A'),
+            (7, 'AGRO-002-A', 'DISPONIBLE', 'Estante 3-B')
         ])
 
     conn.commit()
@@ -296,7 +283,6 @@ def seed_database(conn, is_postgres=True):
 # CONEXIÓN PRINCIPAL
 # ==========================================
 def get_db_connection():
-    # 1. En Windows local: SQL Server EQUIPO
     if sys.platform.startswith('win'):
         try:
             import pyodbc
@@ -305,15 +291,7 @@ def get_db_connection():
         except Exception:
             pass
 
-    # 2. Conexión oficial a Supabase PostgreSQL (IPv4 Session Pooler)
     try:
-        global psycopg2
-        if 'psycopg2' not in sys.modules:
-            try:
-                subprocess.run([sys.executable, "-m", "pip", "install", "psycopg2-binary"], check=False)
-                import psycopg2
-            except Exception:
-                pass
         import psycopg2
         conn = psycopg2.connect(
             host="aws-0-us-east-2.pooler.supabase.com",
@@ -330,7 +308,6 @@ def get_db_connection():
     except Exception as e:
         print(f"Aviso Supabase: {e}")
 
-    # 3. Respaldo local SQLite auto-inicializado
     import sqlite3
     db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'biblioteca_cloud.db')
     conn = sqlite3.connect(db_path, check_same_thread=False)

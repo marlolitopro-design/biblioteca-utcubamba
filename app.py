@@ -39,7 +39,8 @@ def catalogo():
         CAST(l.descripcion AS VARCHAR(MAX)) as descripcion,
         (SELECT COUNT(*) FROM Ejemplares e WHERE e.libro_id = l.libro_id AND e.estado_fisico != 'BAJA') as total_copias,
         (SELECT COUNT(*) FROM Ejemplares e WHERE e.libro_id = l.libro_id AND e.estado_fisico = 'DISPONIBLE') as disponibles,
-        (SELECT TOP 1 e.ubicacion_estante FROM Ejemplares e WHERE e.libro_id = l.libro_id AND e.estado_fisico != 'BAJA') as estante
+        (SELECT TOP 1 e.ubicacion_estante FROM Ejemplares e WHERE e.libro_id = l.libro_id AND e.estado_fisico != 'BAJA') as estante,
+        l.portada_url
     FROM Libros l
     WHERE 1=1
     """
@@ -87,6 +88,7 @@ def catalogo():
             'total_copias': fila[8],
             'disponibles': fila[9],
             'estante': fila[10],
+            'portada_url': fila[11] if len(fila) > 11 and fila[11] else None,
             'carreras_codigos': carreras_codigos
         })
 

@@ -570,6 +570,30 @@ def registrar_devolucion(prestamo_id):
 # -------------------------------------------------------------
 # GESTIÓN DE ESTUDIANTES
 # -------------------------------------------------------------
+def parse_ciclo(val):
+    if not val:
+        return 1
+    s = str(val).strip().upper()
+    roman_map = {
+        'I': 1, 'II': 2, 'III': 3, 'IV': 4, 'V': 5, 'VI': 6,
+        'PRIMERO': 1, 'SEGUNDO': 2, 'TERCERO': 3, 'CUARTO': 4, 'QUINTO': 5, 'SEXTO': 6,
+        '1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6
+    }
+    if s in roman_map:
+        return roman_map[s]
+    m = re.search(r'\b(VI|IV|V|III|II|I)\b', s)
+    if m:
+        return roman_map[m.group(1)]
+    m_num = re.search(r'\d+', s)
+    if m_num:
+        n = int(m_num.group())
+        if 1 <= n <= 10:
+            return n
+    for k in ['VI', 'IV', 'V', 'III', 'II', 'I']:
+        if k in s:
+            return roman_map[k]
+    return 1
+
 @app.route('/admin/alumnos', methods=['GET', 'POST'])
 def listar_alumnos():
     if request.method == 'POST':
@@ -635,9 +659,8 @@ def crear_alumno():
     carrera_id = request.form.get('carrera_id', '').strip()
     ciclo = request.form.get('ciclo', '').strip()
 
-    # Conversión segura a número entero para la base de datos
     c_id = int(carrera_id) if carrera_id and carrera_id.isdigit() else None
-    c_ciclo = int(ciclo) if ciclo and ciclo.isdigit() else 1
+    c_ciclo = parse_ciclo(ciclo)
 
     if len(dni) != 8 or not dni.isdigit():
         flash('El DNI debe contener exactamente 8 dígitos numéricos.', 'danger')
@@ -675,7 +698,7 @@ def editar_alumno(usuario_id):
     estado = request.form.get('estado', 'ACTIVO')
 
     c_id = int(carrera_id) if carrera_id and carrera_id.isdigit() else None
-    c_ciclo = int(ciclo) if ciclo and ciclo.isdigit() else 1
+    c_ciclo = parse_ciclo(ciclo)
 
     conn = get_connection()
     cursor = conn.cursor()
@@ -690,24 +713,6 @@ def editar_alumno(usuario_id):
     conn.close()
 
     flash('Datos del estudiante actualizados correctamente.', 'success')
-    return redirect(url_for('listar_alumnos'))
-
-@app.route('/admin/alumnos/reset/<int:usuario_id>', methods=['POST'])
-def reset_clave_alumno(usuario_id):
-    if not session.get('usuario') or session['usuario']['rol'] != 'ADMIN':
-        return redirect(url_for('login'))
-
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT dni FROM Usuarios WHERE usuario_id = ?", (usuario_id,))
-    fila = cursor.fetchone()
-    if fila:
-        dni = fila[0]
-        cursor.execute("UPDATE Usuarios SET password_hash = ? WHERE usuario_id = ?", (dni, usuario_id))
-        conn.commit()
-        flash(f'Contraseña restablecida con éxito al DNI ({dni}).', 'info')
-
-    conn.close()
     return redirect(url_for('listar_alumnos'))
 
 @app.route('/admin/alumnos/eliminar/<int:usuario_id>', methods=['POST'])

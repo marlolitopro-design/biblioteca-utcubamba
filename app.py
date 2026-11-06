@@ -570,8 +570,11 @@ def registrar_devolucion(prestamo_id):
 # -------------------------------------------------------------
 # GESTIÓN DE ESTUDIANTES
 # -------------------------------------------------------------
-@app.route('/admin/alumnos')
+@app.route('/admin/alumnos', methods=['GET', 'POST'])
 def listar_alumnos():
+    if request.method == 'POST':
+        return crear_alumno()
+
     if not session.get('usuario') or session['usuario']['rol'] != 'ADMIN':
         flash('Acceso restringido para el administrador.', 'warning')
         return redirect(url_for('login'))
@@ -618,16 +621,23 @@ def listar_alumnos():
 
     return render_template('alumnos.html', alumnos=alumnos, carreras=carreras, busqueda=busqueda, carrera_sel=carrera_filtro)
 
-@app.route('/admin/alumnos/crear', methods=['POST'])
+@app.route('/admin/alumnos/crear', methods=['GET', 'POST'])
 def crear_alumno():
+    if request.method == 'GET':
+        return redirect(url_for('listar_alumnos'))
+
     if not session.get('usuario') or session['usuario']['rol'] != 'ADMIN':
         return redirect(url_for('login'))
 
     dni = request.form.get('dni', '').strip()
     nombres = request.form.get('nombres', '').strip()
     apellidos = request.form.get('apellidos', '').strip()
-    carrera_id = request.form.get('carrera_id')
-    ciclo = request.form.get('ciclo')
+    carrera_id = request.form.get('carrera_id', '').strip()
+    ciclo = request.form.get('ciclo', '').strip()
+
+    # Conversión segura a número entero para la base de datos
+    c_id = int(carrera_id) if carrera_id and carrera_id.isdigit() else None
+    c_ciclo = int(ciclo) if ciclo and ciclo.isdigit() else 1
 
     if len(dni) != 8 or not dni.isdigit():
         flash('El DNI debe contener exactamente 8 dígitos numéricos.', 'danger')
@@ -635,6 +645,7 @@ def crear_alumno():
 
     conn = get_connection()
     cursor = conn.cursor()
+
     cursor.execute("SELECT usuario_id FROM Usuarios WHERE dni = ?", (dni,))
     if cursor.fetchone():
         flash(f'El DNI {dni} ya se encuentra registrado en el padrón.', 'warning')
@@ -644,7 +655,7 @@ def crear_alumno():
     cursor.execute("""
         INSERT INTO Usuarios (dni, nombres, apellidos, password_hash, rol, carrera_id, ciclo, estado)
         VALUES (?, ?, ?, ?, 'ALUMNO', ?, ?, 'ACTIVO')
-    """, (dni, nombres, apellidos, dni, carrera_id, ciclo))
+    """, (dni, nombres, apellidos, dni, c_id, c_ciclo))
 
     conn.commit()
     conn.close()
@@ -659,20 +670,25 @@ def editar_alumno(usuario_id):
 
     nombres = request.form.get('nombres', '').strip()
     apellidos = request.form.get('apellidos', '').strip()
-    carrera_id = request.form.get('carrera_id')
-    ciclo = request.form.get('ciclo')
-    estado = request.form.get('estado')
+    carrera_id = request.form.get('carrera_id', '').strip()
+    ciclo = request.form.get('ciclo', '').strip()
+    estado = request.form.get('estado', 'ACTIVO')
+
+    c_id = int(carrera_id) if carrera_id and carrera_id.isdigit() else None
+    c_ciclo = int(ciclo) if ciclo and ciclo.isdigit() else 1
 
     conn = get_connection()
     cursor = conn.cursor()
+
     cursor.execute("""
         UPDATE Usuarios 
         SET nombres = ?, apellidos = ?, carrera_id = ?, ciclo = ?, estado = ?
         WHERE usuario_id = ?
-    """, (nombres, apellidos, carrera_id, ciclo, estado, usuario_id))
+    """, (nombres, apellidos, c_id, c_ciclo, estado, usuario_id))
 
     conn.commit()
     conn.close()
+
     flash('Datos del estudiante actualizados correctamente.', 'success')
     return redirect(url_for('listar_alumnos'))
 

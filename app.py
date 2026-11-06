@@ -512,10 +512,14 @@ def registrar_prestamo():
         flash('Debe seleccionar un ejemplar válido.', 'warning')
         return redirect(url_for('mostrador', dni=dni))
 
+    # Conversión preventiva a enteros para la base de datos
+    u_id = int(usuario_id)
+    e_id = int(ejemplar_id)
+
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute("SELECT COUNT(*) FROM Prestamos WHERE usuario_id = ? AND estado = 'ACTIVO'", (usuario_id,))
+    cursor.execute("SELECT COUNT(*) FROM Prestamos WHERE usuario_id = ? AND estado = 'ACTIVO'", (u_id,))
     activos = cursor.fetchone()[0]
     if activos >= 2:
         flash('Operación denegada: El alumno ya tiene 2 libros en préstamo.', 'danger')
@@ -527,9 +531,9 @@ def registrar_prestamo():
     cursor.execute("""
         INSERT INTO Prestamos (usuario_id, ejemplar_id, fecha_prestamo, fecha_devolucion_prevista, estado)
         VALUES (?, ?, GETDATE(), ?, 'ACTIVO')
-    """, (usuario_id, ejemplar_id, fecha_limite))
+    """, (u_id, e_id, fecha_limite))
 
-    cursor.execute("UPDATE Ejemplares SET estado_fisico = 'PRESTADO' WHERE ejemplar_id = ?", (ejemplar_id,))
+    cursor.execute("UPDATE Ejemplares SET estado_fisico = 'PRESTADO' WHERE ejemplar_id = ?", (e_id,))
     conn.commit()
     conn.close()
 

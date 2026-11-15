@@ -1,13 +1,17 @@
 import os
 import re
 from flask import Flask, render_template, request, redirect, url_for, session, flash
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from werkzeug.security import generate_password_hash, check_password_hash
 from db import get_connection
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'clave_secreta_institucional_utcubamba_2026')
+TZ_PERU = timezone(timedelta(hours=-5))
 
+def ahora_peru():
+    return datetime.now(TZ_PERU).replace(tzinfo=None)
+    
 @app.route('/')
 def index():
     if session.get('usuario'):
@@ -535,40 +539,81 @@ def registrar_prestamo():
     if not session.get('usuario') or session['usuario']['rol'] != 'ADMIN':
         return redirect(url_for('login'))
 
-    usuario_id = request.form.get('usuario_id')
-    ejemplar_id = request.form.get('ejemplar_id')
-    dni = request.form.get('dni')
+    usuario_id = request.form.get('usuario_id', '').strip()
+    ejemplar_id = request.form.get('ejemplar_id', '').strip()
+    dni = request.form.get('dni', '').strip()
 
-    if not usuario_id or not ejemplar_id:
-        flash('Debe seleccionar un ejemplar válido.', 'warning')
+    try:
+        u_id = int(usuario_id)
+        e_id = int(ejemplar_id)
+    except (ValueError, TypeError):
+        flash('Debe seleccionar un alumno y un ejemplar válidos.', 'warning')
         return redirect(url_for('mostrador', dni=dni))
-
-    # Conversión preventiva a enteros para la base de datos
-    u_id = int(usuario_id)
-    e_id = int(ejemplar_id)
 
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute("SELECT COUNT(*) FROM Prestamos WHERE usuario_id = ? AND estado = 'ACTIVO'", (u_id,))
-    activos = cursor.fetchone()[0]
-    if activos >= 2:
-        flash('Operación denegada: El alumno ya tiene 2 libros en préstamo.', 'danger')
+    try:
+        # 1. Verificar que el alumno exista y esté ACTIVO
+        cursor.execute(
+            "SELECT estado FROM Usuarios WHERE usuario_id = ? AND rol = 'ALUMNO'",
+            (u_id,)
+        )
+        alumno_row = cursor.fetchone()
+        if not alumno_row or alumno_row[0] != 'ACTIVO':
+            flash('Operación denegada: El estudiante no existe o está inhabilitado.', 'danger')
+            return redirect(url_for('mostrador', dni=dni))
+
+        # 2. Bloqueo automático por morosidad (préstamos vencidos)
+        ahora = ahora_peru()
+        cursor.execute(
+            "SELECT COUNT(*) FROM Prestamos WHERE usuario_id = ? AND estado = 'ACTIVO' AND fecha_devolucion_prevista < ?",
+            (u_id, ahora)
+        )
+        vencidos = cursor.fetchone()[0]
+        if vencidos > 0:
+            flash('Operación denegada: El alumno tiene préstamo(s) vencido(s). Debe regularizar su devolución primero.', 'danger')
+            return redirect(url_for('mostrador', dni=dni))
+
+        # 3. Límite máximo de 2 libros activos
+        cursor.execute(
+            "SELECT COUNT(*) FROM Prestamos WHERE usuario_id = ? AND estado = 'ACTIVO'",
+            (u_id,)
+        )
+        activos = cursor.fetchone()[0]
+        if activos >= 2:
+            flash('Operación denegada: El alumno ya tiene 2 libros en préstamo.', 'danger')
+            return redirect(url_for('mostrador', dni=dni))
+
+        # 4. Verificar que la copia física siga DISPONIBLE (evita doble préstamo por recarga)
+        cursor.execute(
+            "SELECT estado_fisico FROM Ejemplares WHERE ejemplar_id = ?",
+            (e_id,)
+        )
+        ej_row = cursor.fetchone()
+        if not ej_row or ej_row[0] != 'DISPONIBLE':
+            flash('Este ejemplar ya no está disponible para préstamo.', 'warning')
+            return redirect(url_for('mostrador', dni=dni))
+
+        fecha_limite = ahora + timedelta(days=7)
+
+        cursor.execute("""
+            INSERT INTO Prestamos (usuario_id, ejemplar_id, fecha_prestamo, fecha_devolucion_prevista, estado)
+            VALUES (?, ?, ?, ?, 'ACTIVO')
+        """, (u_id, e_id, ahora, fecha_limite))
+
+        cursor.execute(
+            "UPDATE Ejemplares SET estado_fisico = 'PRESTADO' WHERE ejemplar_id = ?",
+            (e_id,)
+        )
+        conn.commit()
+        flash('¡Préstamo registrado exitosamente y carnet retenido en mostrador!', 'success')
+    except Exception:
+        conn.rollback()
+        flash('Ocurrió un error al registrar el préstamo. Intente nuevamente.', 'danger')
+    finally:
         conn.close()
-        return redirect(url_for('mostrador', dni=dni))
 
-    fecha_limite = datetime.now() + timedelta(days=7)
-
-    cursor.execute("""
-        INSERT INTO Prestamos (usuario_id, ejemplar_id, fecha_prestamo, fecha_devolucion_prevista, estado)
-        VALUES (?, ?, GETDATE(), ?, 'ACTIVO')
-    """, (u_id, e_id, fecha_limite))
-
-    cursor.execute("UPDATE Ejemplares SET estado_fisico = 'PRESTADO' WHERE ejemplar_id = ?", (e_id,))
-    conn.commit()
-    conn.close()
-
-    flash('¡Préstamo registrado exitosamente y carnet retenido en mostrador!', 'success')
     return redirect(url_for('mostrador', dni=dni))
 
 @app.route('/admin/devolver/<int:prestamo_id>', methods=['POST'])
@@ -661,9 +706,9 @@ def listar_alumnos():
         query += " AND (u.dni LIKE ? OR u.nombres LIKE ? OR u.apellidos LIKE ?)"
         params.extend([f"%{busqueda}%", f"%{busqueda}%", f"%{busqueda}%"])
 
-    if carrera_filtro:
+    if carrera_filtro and carrera_filtro.isdigit():
         query += " AND u.carrera_id = ?"
-        params.append(carrera_filtro)
+        params.append(int(carrera_filtro))
 
     query += " ORDER BY u.apellidos ASC, u.nombres ASC"
     cursor.execute(query, params)
@@ -696,6 +741,10 @@ def crear_alumno():
 
     c_id = int(carrera_id) if carrera_id and carrera_id.isdigit() else None
     c_ciclo = parse_ciclo(ciclo)
+
+    if not nombres or not apellidos:
+        flash('Los nombres y apellidos del estudiante son obligatorios.', 'danger')
+        return redirect(url_for('listar_alumnos'))
 
     if len(dni) != 8 or not dni.isdigit():
         flash('El DNI debe contener exactamente 8 dígitos numéricos.', 'danger')
@@ -864,7 +913,12 @@ def crear_libro():
     titulo = request.form.get('titulo', '').strip()
     autor = request.form.get('autor', '').strip()
     editorial = request.form.get('editorial', '').strip()
-    anio = request.form.get('anio_publicacion') or None
+    anio_raw = request.form.get('anio_publicacion', '').strip()
+    try:
+        anio = int(anio_raw) if anio_raw else None
+    except ValueError:
+        flash('El año de publicación debe ser un número válido.', 'warning')
+        return redirect(url_for('listar_libros'))
     tipo_recurso = request.form.get('tipo_recurso')
     archivo_pdf = request.form.get('archivo_pdf_url', '').strip() or None
     portada = request.form.get('portada_url', '').strip() or None
@@ -902,7 +956,12 @@ def editar_libro(libro_id):
     titulo = request.form.get('titulo', '').strip()
     autor = request.form.get('autor', '').strip()
     editorial = request.form.get('editorial', '').strip()
-    anio = request.form.get('anio_publicacion') or None
+    anio_raw = request.form.get('anio_publicacion', '').strip()
+    try:
+        anio = int(anio_raw) if anio_raw else None
+    except ValueError:
+        flash('El año de publicación debe ser un número válido.', 'warning')
+        return redirect(url_for('listar_libros'))
     tipo_recurso = request.form.get('tipo_recurso')
     archivo_pdf = request.form.get('archivo_pdf_url', '').strip() or None
     portada = request.form.get('portada_url', '').strip() or None
@@ -1007,10 +1066,16 @@ def eliminar_ejemplar(ejemplar_id):
         if fila[0] == 'PRESTADO':
             flash('No se puede eliminar una copia que se encuentra prestada actualmente.', 'danger')
         else:
-            cursor.execute("DELETE FROM Prestamos WHERE ejemplar_id = ?", (ejemplar_id,))
-            cursor.execute("DELETE FROM Ejemplares WHERE ejemplar_id = ?", (ejemplar_id,))
-            conn.commit()
-            flash(f'Copia física [{fila[1]}] eliminada del inventario.', 'info')
+            cursor.execute("SELECT COUNT(*) FROM Prestamos WHERE ejemplar_id = ?", (ejemplar_id,))
+            tiene_historial = cursor.fetchone()[0]
+            if tiene_historial > 0:
+                cursor.execute("UPDATE Ejemplares SET estado_fisico = 'BAJA' WHERE ejemplar_id = ?", (ejemplar_id,))
+                conn.commit()
+                flash(f'Copia [{fila[1]}] dada de BAJA para conservar el historial de préstamos.', 'warning')
+            else:
+                cursor.execute("DELETE FROM Ejemplares WHERE ejemplar_id = ?", (ejemplar_id,))
+                conn.commit()
+                flash(f'Copia física [{fila[1]}] eliminada del inventario.', 'info')
 
     conn.close()
     return redirect(url_for('listar_libros'))
@@ -1066,6 +1131,16 @@ def eliminar_libro(libro_id):
 
     conn.close()
     return redirect(url_for('listar_libros'))
+
+@app.errorhandler(404)
+def pagina_no_encontrada(e):
+    flash('La página solicitada no existe.', 'warning')
+    return redirect(url_for('catalogo'))
+
+@app.errorhandler(500)
+def error_interno(e):
+    flash('Ocurrió un error inesperado al procesar la solicitud. Por favor, intenta nuevamente.', 'danger')
+    return redirect(url_for('index'))
 
 if __name__ == '__main__':
     debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'

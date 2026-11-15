@@ -1,20 +1,15 @@
 import os
 import sys
 import re
-import subprocess
 from datetime import datetime
+from werkzeug.security import generate_password_hash
 
-# ==========================================
-# AUTO-INSTALACIÓN AUTOMÁTICA DE PSYCOPG2
-# ==========================================
 try:
     import psycopg2
 except ImportError:
-    try:
-        subprocess.run([sys.executable, "-m", "pip", "install", "psycopg2-binary"], check=False)
-        import psycopg2
-    except Exception:
-        pass
+    psycopg2 = None
+
+_DB_INITIALIZED = False
 
 # ==========================================
 # TRADUCTOR SQL SERVER -> POSTGRESQL / SQLITE
@@ -22,7 +17,7 @@ except ImportError:
 def clean_sql(sql, is_postgres=True):
     if not isinstance(sql, str):
         return sql
-    
+
     sql = re.sub(r'VARCHAR\s*\(\s*MAX\s*\)', 'TEXT', sql, flags=re.IGNORECASE)
     sql = re.sub(r'NVARCHAR\s*\(\s*MAX\s*\)', 'TEXT', sql, flags=re.IGNORECASE)
     sql = re.sub(r'\bDATEDIFF\s*\(\s*([a-zA-Z]+)\s*,', r"DATEDIFF('\1',", sql, flags=re.IGNORECASE)
@@ -65,6 +60,16 @@ def parse_date_if_str(val):
                     pass
     return val
 
+def sqlite_datediff(unit, d1, d2):
+    try:
+        dt1 = parse_date_if_str(str(d1))
+        dt2 = parse_date_if_str(str(d2))
+        if isinstance(dt1, datetime) and isinstance(dt2, datetime):
+            return (dt2.date() - dt1.date()).days
+    except Exception:
+        pass
+    return 0
+
 class UniversalRow(dict):
     def __init__(self, cursor, row):
         super().__init__()
@@ -72,8 +77,8 @@ class UniversalRow(dict):
         self._row = [parse_date_if_str(v) for v in row]
         for idx, col in enumerate(self._keys):
             val = self._row[idx]
-            self[col] = val
-            self[normalize_key(col)] = val
+            super().__setitem__(col, val)
+            super().__setitem__(normalize_key(col), val)
 
     def __getitem__(self, key):
         if isinstance(key, int):
@@ -86,9 +91,11 @@ class UniversalRow(dict):
         return None
 
     def __getattr__(self, item):
-        val = self[item]
-        if val is not None:
-            return val
+        if item in self:
+            return super().__getitem__(item)
+        norm = normalize_key(item)
+        if norm in self:
+            return super().__getitem__(norm)
         raise AttributeError(f"No existe el atributo '{item}'")
 
     def get(self, key, default=None):
@@ -108,7 +115,7 @@ class CompatCursor:
             if params is None or len(params) == 0:
                 return self._cur.execute(sql_clean)
             return self._cur.execute(sql_clean, tuple(params))
-        
+
         m_out = re.search(r'OUTPUT\s+INSERTED\.(\w+)', sql, flags=re.IGNORECASE)
         if m_out:
             sql_clean = re.sub(r'OUTPUT\s+INSERTED\.\w+', '', sql_clean, flags=re.IGNORECASE)
@@ -174,7 +181,7 @@ def seed_database(conn, is_postgres=True):
     cur = conn.cursor()
     if is_postgres:
         cur.execute("""
-            CREATE OR REPLACE FUNCTION GETDATE() RETURNS TIMESTAMP AS $$ BEGIN RETURN CURRENT_TIMESTAMP; END; $$ LANGUAGE plpgsql;
+            CREATE OR REPLACE FUNCTION GETDATE() RETURNS TIMESTAMP AS $$ BEGIN RETURN (CURRENT_TIMESTAMP AT TIME ZONE 'America/Lima'); END; $$ LANGUAGE plpgsql;
             CREATE OR REPLACE FUNCTION DATEDIFF(unit TEXT, d1 TIMESTAMP, d2 TIMESTAMP) RETURNS INTEGER AS $$ BEGIN RETURN (d2::date - d1::date); END; $$ LANGUAGE plpgsql;
         """)
 
@@ -194,7 +201,7 @@ def seed_database(conn, is_postgres=True):
             apellidos VARCHAR(100) NOT NULL,
             password_hash VARCHAR(255) NOT NULL,
             rol VARCHAR(20) NOT NULL DEFAULT 'ALUMNO',
-            carrera_id INTEGER,
+            carrera_id INTEGER REFERENCES Carreras(carrera_id),
             ciclo INTEGER DEFAULT 1,
             estado VARCHAR(20) DEFAULT 'ACTIVO'
         );
@@ -211,21 +218,21 @@ def seed_database(conn, is_postgres=True):
             portada_url VARCHAR(255)
         );
         CREATE TABLE IF NOT EXISTS LibroCarrera (
-            libro_id INTEGER NOT NULL,
-            carrera_id INTEGER NOT NULL,
+            libro_id INTEGER NOT NULL REFERENCES Libros(libro_id),
+            carrera_id INTEGER NOT NULL REFERENCES Carreras(carrera_id),
             PRIMARY KEY (libro_id, carrera_id)
         );
         CREATE TABLE IF NOT EXISTS Ejemplares (
             ejemplar_id {pk_type},
-            libro_id INTEGER NOT NULL,
+            libro_id INTEGER NOT NULL REFERENCES Libros(libro_id),
             codigo_patrimonio VARCHAR(50) UNIQUE NOT NULL,
             estado_fisico VARCHAR(30) DEFAULT 'DISPONIBLE',
             ubicacion_estante VARCHAR(100) DEFAULT 'Estante 1-A'
         );
         CREATE TABLE IF NOT EXISTS Prestamos (
             prestamo_id {pk_type},
-            usuario_id INTEGER NOT NULL,
-            ejemplar_id INTEGER NOT NULL,
+            usuario_id INTEGER NOT NULL REFERENCES Usuarios(usuario_id),
+            ejemplar_id INTEGER NOT NULL REFERENCES Ejemplares(ejemplar_id),
             fecha_prestamo {ts_now},
             fecha_devolucion_prevista {ts_now},
             fecha_devolucion_real {ts_now},
@@ -235,8 +242,8 @@ def seed_database(conn, is_postgres=True):
         );
         CREATE TABLE IF NOT EXISTS AccesosDigitales (
             acceso_id {pk_type},
-            usuario_id INTEGER NOT NULL,
-            libro_id INTEGER NOT NULL,
+            usuario_id INTEGER NOT NULL REFERENCES Usuarios(usuario_id),
+            libro_id INTEGER NOT NULL REFERENCES Libros(libro_id),
             fecha_acceso {ts_now},
             direccion_ip VARCHAR(50) DEFAULT '127.0.0.1'
         );
@@ -247,7 +254,6 @@ def seed_database(conn, is_postgres=True):
     else:
         conn.executescript(schema_sql)
 
-    # Migración automática de columna portada_url por si la tabla ya existía
     try:
         if is_postgres:
             cur.execute("ALTER TABLE Libros ADD COLUMN IF NOT EXISTS portada_url VARCHAR(255);")
@@ -255,7 +261,7 @@ def seed_database(conn, is_postgres=True):
             cur.execute("ALTER TABLE Libros ADD COLUMN portada_url TEXT;")
         conn.commit()
     except Exception:
-        pass
+        conn.rollback()
 
     cur.execute("SELECT COUNT(*) FROM Carreras")
     if cur.fetchone()[0] == 0:
@@ -267,30 +273,36 @@ def seed_database(conn, is_postgres=True):
             ('Contabilidad', 'CONT')
         ])
 
-        ph8 = ", ".join([ph]*8)
-        cur.executemany(f"INSERT INTO Usuarios (dni, nombres, apellidos, password_hash, rol, carrera_id, ciclo, estado) VALUES ({ph8})", [
-            ('admin', 'Administrador', 'Biblioteca Central', 'admin123', 'ADMIN', 1, 6, 'ACTIVO'),
-            ('74859612', 'Marlo', 'Vilchez Cuzque', '74859612', 'ALUMNO', 1, 6, 'ACTIVO'),
-            ('71234567', 'Rosa María', 'Díaz López', '71234567', 'ALUMNO', 2, 4, 'ACTIVO'),
-            ('72345678', 'Juan Carlos', 'Huamán Quispe', '72345678', 'ALUMNO', 3, 2, 'ACTIVO'),
-            ('73456789', 'Ana Lucía', 'Pérez Torres', '73456789', 'ALUMNO', 4, 5, 'ACTIVO')
-        ])
+        ph8 = ", ".join([ph] * 8)
+        cur.executemany(
+            f"INSERT INTO Usuarios (dni, nombres, apellidos, password_hash, rol, carrera_id, ciclo, estado) VALUES ({ph8})",
+            [
+                ('admin', 'Administrador', 'Biblioteca Central', generate_password_hash('admin123'), 'ADMIN', 1, 6, 'ACTIVO'),
+                ('74859612', 'Marlo', 'Vilchez Cuzque', generate_password_hash('74859612'), 'ALUMNO', 1, 6, 'ACTIVO'),
+                ('71234567', 'Rosa María', 'Díaz López', generate_password_hash('71234567'), 'ALUMNO', 2, 4, 'ACTIVO'),
+                ('72345678', 'Juan Carlos', 'Huamán Quispe', generate_password_hash('72345678'), 'ALUMNO', 3, 2, 'ACTIVO'),
+                ('73456789', 'Ana Lucía', 'Pérez Torres', generate_password_hash('73456789'), 'ALUMNO', 4, 5, 'ACTIVO')
+            ]
+        )
 
-        ph7 = ", ".join([ph]*7)
-        cur.executemany(f"INSERT INTO Libros (titulo, autor, editorial, anio_publicacion, tipo_recurso, archivo_pdf_url, descripcion) VALUES ({ph7})", [
-            ('Redes y Conectividad de Datos', 'Andrew S. Tanenbaum', 'Pearson', 2021, 'HIBRIDO', 'redes_datos.pdf', 'Topologías, protocolos TCP/IP y diseño de redes corporativas.'),
-            ('Desarrollo Web con Python y Flask', 'Miguel Grinberg', 'O Reilly', 2023, 'HIBRIDO', 'python_flask.pdf', 'Arquitectura MVC, APIs REST y plantillas Jinja2.'),
-            ('Manual de Primeros Auxilios y Soporte Básico', 'Cruz Roja Internacional', 'Médica Panamericana', 2022, 'HIBRIDO', 'primeros_auxilios.pdf', 'Protocolos de atención inicial y evaluación de signos vitales.'),
-            ('Farmacología Básica y Clínica', 'Bertram G. Katzung', 'McGraw-Hill', 2021, 'FISICO', None, 'Clasificación de fármacos, dosis terapéuticas y farmacovigilancia.'),
-            ('Manejo Agroecológico de Suelos y Cultivos', 'Miguel A. Altieri', 'Mundiprensa', 2022, 'HIBRIDO', 'manejo_suelos.pdf', 'Fertilidad del suelo, rotación de cultivos y control biológico.'),
-            ('Contabilidad Financiera y Tributaria', 'Erick Valdivia', 'Instituto Pacífico', 2023, 'HIBRIDO', 'contabilidad_tributaria.pdf', 'Normas NIIF, asientos contables y obligaciones fiscales Sunat.')
-        ])
+        ph7 = ", ".join([ph] * 7)
+        cur.executemany(
+            f"INSERT INTO Libros (titulo, autor, editorial, anio_publicacion, tipo_recurso, archivo_pdf_url, descripcion) VALUES ({ph7})",
+            [
+                ('Redes y Conectividad de Datos', 'Andrew S. Tanenbaum', 'Pearson', 2021, 'HIBRIDO', 'redes_datos.pdf', 'Topologías, protocolos TCP/IP y diseño de redes corporativas.'),
+                ('Desarrollo Web con Python y Flask', 'Miguel Grinberg', 'O Reilly', 2023, 'HIBRIDO', 'python_flask.pdf', 'Arquitectura MVC, APIs REST y plantillas Jinja2.'),
+                ('Manual de Primeros Auxilios y Soporte Básico', 'Cruz Roja Internacional', 'Médica Panamericana', 2022, 'HIBRIDO', 'primeros_auxilios.pdf', 'Protocolos de atención inicial y evaluación de signos vitales.'),
+                ('Farmacología Básica y Clínica', 'Bertram G. Katzung', 'McGraw-Hill', 2021, 'FISICO', None, 'Clasificación de fármacos, dosis terapéuticas y farmacovigilancia.'),
+                ('Manejo Agroecológico de Suelos y Cultivos', 'Miguel A. Altieri', 'Mundiprensa', 2022, 'HIBRIDO', 'manejo_suelos.pdf', 'Fertilidad del suelo, rotación de cultivos y control biológico.'),
+                ('Contabilidad Financiera y Tributaria', 'Erick Valdivia', 'Instituto Pacífico', 2023, 'HIBRIDO', 'contabilidad_tributaria.pdf', 'Normas NIIF, asientos contables y obligaciones fiscales Sunat.')
+            ]
+        )
 
         cur.executemany(f"INSERT INTO LibroCarrera (libro_id, carrera_id) VALUES ({ph}, {ph})", [
             (1, 1), (2, 1), (3, 2), (4, 2), (5, 3), (6, 4)
         ])
 
-        ph4 = ", ".join([ph]*4)
+        ph4 = ", ".join([ph] * 4)
         cur.executemany(f"INSERT INTO Ejemplares (libro_id, codigo_patrimonio, estado_fisico, ubicacion_estante) VALUES ({ph4})", [
             (1, 'APSTI-001-A', 'DISPONIBLE', 'Estante 1-A'),
             (1, 'APSTI-001-B', 'DISPONIBLE', 'Estante 1-A'),
@@ -307,47 +319,48 @@ def seed_database(conn, is_postgres=True):
 # CONEXIÓN PRINCIPAL
 # ==========================================
 def get_db_connection():
+    global _DB_INITIALIZED
+
     # 1. En Windows local: SQL Server EQUIPO
     if sys.platform.startswith('win'):
         try:
             import pyodbc
-            conn_str = "DRIVER={ODBC Driver 17 for SQL Server};SERVER=EQUIPO;DATABASE=BibliotecaUtcubamba;Trusted_Connection=yes;"
+            conn_str = os.environ.get(
+                "MSSQL_CONN_STR",
+                "DRIVER={ODBC Driver 17 for SQL Server};SERVER=EQUIPO;DATABASE=BibliotecaUtcubamba;Trusted_Connection=yes;"
+            )
             return pyodbc.connect(conn_str)
         except Exception:
             pass
 
     # 2. Conexión oficial a Supabase PostgreSQL
-    try:
-        global psycopg2
-        if 'psycopg2' not in sys.modules:
-            try:
-                subprocess.run([sys.executable, "-m", "pip", "install", "psycopg2-binary"], check=False)
-                import psycopg2
-            except Exception:
-                pass
-        import psycopg2
-        conn = psycopg2.connect(
-            host="aws-0-us-east-2.pooler.supabase.com",
-            port=5432,
-            user="postgres.eolwyomlogeobdvkrgmw",
-            password="Utcubamba2026*",
-            dbname="postgres",
-            sslmode="require",
-            connect_timeout=10
-        )
-        conn.autocommit = True
-        seed_database(conn, True)
-        return CompatConnection(conn, True)
-    except Exception as e:
-        print(f"Aviso Supabase: {e}")
+    if psycopg2 is not None:
+        try:
+            conn = psycopg2.connect(
+                host=os.environ.get("PGHOST", "aws-0-us-east-2.pooler.supabase.com"),
+                port=int(os.environ.get("PGPORT", "5432")),
+                user=os.environ.get("PGUSER", "postgres.eolwyomlogeobdvkrgmw"),
+                password=os.environ.get("PGPASSWORD", "Utcubamba2026*"),
+                dbname=os.environ.get("PGDATABASE", "postgres"),
+                sslmode="require",
+                connect_timeout=10
+            )
+            if not _DB_INITIALIZED:
+                seed_database(conn, True)
+                _DB_INITIALIZED = True
+            return CompatConnection(conn, True)
+        except Exception as e:
+            print(f"Aviso Supabase: {e}")
 
     # 3. Respaldo local SQLite auto-migrado
     import sqlite3
     db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'biblioteca_cloud.db')
     conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.create_function("GETDATE", 0, lambda: datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-    conn.create_function("DATEDIFF", 3, lambda u, d1, d2: 0)
-    seed_database(conn, False)
+    conn.create_function("DATEDIFF", 3, sqlite_datediff)
+    if not _DB_INITIALIZED:
+        seed_database(conn, False)
+        _DB_INITIALIZED = True
     return CompatConnection(conn, False)
 
 def get_connection():

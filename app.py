@@ -1,9 +1,12 @@
+import os
+import re
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 from datetime import datetime, timedelta
+from werkzeug.security import generate_password_hash, check_password_hash
 from db import get_connection
 
 app = Flask(__name__)
-app.secret_key = 'clave_secreta_institucional_utcubamba_2026'
+app.secret_key = os.environ.get('SECRET_KEY', 'clave_secreta_institucional_utcubamba_2026')
 
 @app.route('/')
 def index():
@@ -124,7 +127,24 @@ def login():
         user = cursor.fetchone()
         conn.close()
 
-        if user and (user.password_hash == password):
+        password_ok = False
+        if user:
+            stored = user.password_hash or ''
+            if stored.startswith(('pbkdf2:', 'scrypt:')):
+                password_ok = check_password_hash(stored, password)
+            else:
+                password_ok = (stored == password)
+                if password_ok:
+                    conn_upd = get_connection()
+                    cur_upd = conn_upd.cursor()
+                    cur_upd.execute(
+                        "UPDATE Usuarios SET password_hash = ? WHERE usuario_id = ?",
+                        (generate_password_hash(password), user.usuario_id)
+                    )
+                    conn_upd.commit()
+                    conn_upd.close()
+
+        if user and password_ok:
             if user.estado != 'ACTIVO':
                 flash('Su cuenta se encuentra inhabilitada. Contacte a biblioteca.', 'danger')
                 return render_template('login.html')
@@ -296,14 +316,25 @@ def alumno_perfil():
         confirmar = request.form.get('password_confirmar', '').strip()
 
         cursor.execute("SELECT password_hash FROM Usuarios WHERE usuario_id = ?", (usuario_id,))
-        clave_bd = cursor.fetchone()[0]
+        fila = cursor.fetchone()
+        stored = (fila[0] or '') if fila else ''
 
-        if clave_bd != actual:
+        if stored.startswith(('pbkdf2:', 'scrypt:')):
+            actual_ok = check_password_hash(stored, actual)
+        else:
+            actual_ok = (stored == actual)
+
+        if not actual_ok:
             flash('La contraseña actual ingresada es incorrecta.', 'danger')
         elif nueva != confirmar:
             flash('La nueva contraseña y la confirmación no coinciden.', 'warning')
+        elif len(nueva) < 6:
+            flash('La nueva contraseña debe tener al menos 6 caracteres.', 'warning')
         else:
-            cursor.execute("UPDATE Usuarios SET password_hash = ? WHERE usuario_id = ?", (nueva, usuario_id))
+            cursor.execute(
+                "UPDATE Usuarios SET password_hash = ? WHERE usuario_id = ?",
+                (generate_password_hash(nueva), usuario_id)
+            )
             conn.commit()
             flash('¡Tu contraseña ha sido actualizada con éxito!', 'success')
 
@@ -682,8 +713,8 @@ def crear_alumno():
     cursor.execute("""
         INSERT INTO Usuarios (dni, nombres, apellidos, password_hash, rol, carrera_id, ciclo, estado)
         VALUES (?, ?, ?, ?, 'ALUMNO', ?, ?, 'ACTIVO')
-    """, (dni, nombres, apellidos, dni, c_id, c_ciclo))
-
+    """, (dni, nombres, apellidos, generate_password_hash(dni), c_id, c_ciclo))
+    
     conn.commit()
     conn.close()
 
@@ -1037,4 +1068,5 @@ def eliminar_libro(libro_id):
     return redirect(url_for('listar_libros'))
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
+    app.run(debug=debug_mode, port=5000)

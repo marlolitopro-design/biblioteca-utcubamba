@@ -1,3 +1,6 @@
+import uuid
+import requests
+from werkzeug.utils import secure_filename
 import os
 import re
 from io import BytesIO
@@ -14,6 +17,49 @@ TZ_PERU = timezone(timedelta(hours=-5))
 
 def ahora_peru():
     return datetime.now(TZ_PERU).replace(tzinfo=None)
+
+def media_url(valor):
+    if not valor:
+        return ''
+    if str(valor).startswith(('http://', 'https://')):
+        return valor
+    return url_for('static', filename='uploads/' + str(valor))
+
+app.jinja_env.globals['media_url'] = media_url
+
+def subir_archivo_nube(file_storage, carpeta):
+    if not file_storage or not file_storage.filename:
+        return None
+    nombre_limpio = secure_filename(file_storage.filename)
+    if not nombre_limpio:
+        return None
+
+    supabase_url = os.environ.get('SUPABASE_URL', '').rstrip('/')
+    service_key = os.environ.get('SUPABASE_SERVICE_KEY', '').strip()
+
+    if supabase_url and service_key:
+        ruta_objeto = f"{carpeta}/{uuid.uuid4().hex[:8]}_{nombre_limpio}"
+        endpoint = f"{supabase_url}/storage/v1/object/biblioteca-archivos/{ruta_objeto}"
+        headers = {
+            "apikey": service_key,
+            "Authorization": f"Bearer {service_key}",
+            "Content-Type": file_storage.mimetype or "application/octet-stream",
+            "x-upsert": "true"
+        }
+        try:
+            resp = requests.post(endpoint, headers=headers, data=file_storage.read(), timeout=30)
+            if resp.status_code in (200, 201):
+                return f"{supabase_url}/storage/v1/object/public/biblioteca-archivos/{ruta_objeto}"
+        except Exception:
+            pass
+        return None
+
+    # Respaldo si pruebas en tu PC local sin variables de Supabase
+    carpeta_local = os.path.join(app.root_path, 'static', 'uploads')
+    os.makedirs(carpeta_local, exist_ok=True)
+    nombre_local = f"{uuid.uuid4().hex[:8]}_{nombre_limpio}"
+    file_storage.save(os.path.join(carpeta_local, nombre_local))
+    return nombre_local
     
 @app.route('/')
 def index():
@@ -1044,8 +1090,11 @@ def crear_libro():
         flash('El año de publicación debe ser un número válido.', 'warning')
         return redirect(url_for('listar_libros'))
     tipo_recurso = request.form.get('tipo_recurso')
-    archivo_pdf = request.form.get('archivo_pdf_url', '').strip() or None
-    portada = request.form.get('portada_url', '').strip() or None
+    pdf_subido = subir_archivo_nube(request.files.get('archivo_pdf_file'), 'pdfs')
+    portada_subida = subir_archivo_nube(request.files.get('portada_file'), 'portadas')
+
+    archivo_pdf = pdf_subido or request.form.get('archivo_pdf_url', '').strip() or None
+    portada = portada_subida or request.form.get('portada_url', '').strip() or None
     descripcion = request.form.get('descripcion', '').strip()
     carreras_seleccionadas = request.form.getlist('carreras')
 
@@ -1087,8 +1136,11 @@ def editar_libro(libro_id):
         flash('El año de publicación debe ser un número válido.', 'warning')
         return redirect(url_for('listar_libros'))
     tipo_recurso = request.form.get('tipo_recurso')
-    archivo_pdf = request.form.get('archivo_pdf_url', '').strip() or None
-    portada = request.form.get('portada_url', '').strip() or None
+    pdf_subido = subir_archivo_nube(request.files.get('archivo_pdf_file'), 'pdfs')
+    portada_subida = subir_archivo_nube(request.files.get('portada_file'), 'portadas')
+
+    archivo_pdf = pdf_subido or request.form.get('archivo_pdf_url', '').strip() or None
+    portada = portada_subida or request.form.get('portada_url', '').strip() or None
     descripcion = request.form.get('descripcion', '').strip()
     carreras_seleccionadas = request.form.getlist('carreras')
 

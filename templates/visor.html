@@ -56,7 +56,7 @@
     <div class="visor-container">
         {% if libro.archivo_pdf_url %}
             <!-- Carga el archivo PDF local de static/uploads/ -->
-            <iframe src="{{ url_for('static', filename='uploads/' + libro.archivo_pdf_url) }}"></iframe>
+            <iframe src="{{ media_url(libro.archivo_pdf_url) }}"></iframe>
         {% else %}
             <!-- Mensaje en caso de que no tenga archivo cargado aún -->
             <div class="d-flex flex-column justify-content-center align-items-center h-100 text-white text-center p-4">

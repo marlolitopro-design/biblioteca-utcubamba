@@ -1,9 +1,12 @@
 import os
 import re
-from flask import Flask, render_template, request, redirect, url_for, session, flash
+from io import BytesIO
+from flask import Flask, render_template, request, redirect, url_for, session, flash, send_file
 from datetime import datetime, timedelta, timezone
 from werkzeug.security import generate_password_hash, check_password_hash
 from db import get_connection
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'clave_secreta_institucional_utcubamba_2026')
@@ -454,6 +457,127 @@ def dashboard():
         total_alumnos=total_alumnos,
         resumen_carreras=resumen_carreras,
         reporte_prestamos=reporte_prestamos
+    )
+
+@app.route('/admin/reporte/excel')
+def exportar_reporte_excel():
+    if not session.get('usuario') or session['usuario']['rol'] != 'ADMIN':
+        flash('Acceso restringido para el administrador.', 'warning')
+        return redirect(url_for('login'))
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT u.dni, u.nombres, u.apellidos, COALESCE(c.codigo, '-'), u.ciclo,
+               l.titulo, e.codigo_patrimonio, p.fecha_prestamo, p.fecha_devolucion_prevista
+        FROM Prestamos p
+        JOIN Usuarios u ON p.usuario_id = u.usuario_id
+        JOIN Ejemplares e ON p.ejemplar_id = e.ejemplar_id
+        JOIN Libros l ON e.libro_id = l.libro_id
+        LEFT JOIN Carreras c ON u.carrera_id = c.carrera_id
+        WHERE p.estado = 'ACTIVO'
+        ORDER BY p.fecha_devolucion_prevista ASC
+    """)
+    prestamos = cursor.fetchall()
+
+    cursor.execute("""
+        SELECT c.nombre, c.codigo, COUNT(u.usuario_id)
+        FROM Carreras c
+        LEFT JOIN Usuarios u ON c.carrera_id = u.carrera_id AND u.rol = 'ALUMNO'
+        GROUP BY c.nombre, c.codigo, c.carrera_id
+        ORDER BY c.carrera_id
+    """)
+    carreras_res = cursor.fetchall()
+
+    cursor.execute("""
+        SELECT estado_fisico, COUNT(*)
+        FROM Ejemplares
+        GROUP BY estado_fisico
+    """)
+    inventario_res = cursor.fetchall()
+    conn.close()
+
+    wb = openpyxl.Workbook()
+    header_fill = PatternFill(start_color="1E3A5F", end_color="1E3A5F", fill_type="solid")
+    header_font = Font(color="FFFFFF", bold=True)
+    mora_fill = PatternFill(start_color="FDE2E1", end_color="FDE2E1", fill_type="solid")
+    mora_font = Font(color="9B1C1C", bold=True)
+
+    # --- HOJA 1: PRÉSTAMOS ACTIVOS ---
+    ws1 = wb.active
+    ws1.title = "Préstamos Activos"
+    ws1.append(["IESTP UTCUBAMBA - REPORTE DE PRÉSTAMOS ACTIVOS (SIGEB)"])
+    ws1["A1"].font = Font(size=13, bold=True)
+    ws1.append([f"Generado: {ahora_peru().strftime('%d/%m/%Y %H:%M')}"])
+    ws1.append([])
+
+    encabezados1 = ["DNI", "Estudiante", "Carrera", "Ciclo", "Libro", "Código Ejemplar", "Fecha Préstamo", "Vencimiento", "Días Retraso", "Estado"]
+    ws1.append(encabezados1)
+    for col in range(1, len(encabezados1) + 1):
+        c = ws1.cell(row=4, column=col)
+        c.fill = header_fill
+        c.font = header_font
+        c.alignment = Alignment(horizontal="center")
+
+    hoy = ahora_peru().date()
+    for r in prestamos:
+        f_pres = r[7].strftime('%d/%m/%Y') if hasattr(r[7], 'strftime') else str(r[7] or '')
+        f_prev_dt = r[8]
+        f_prev = f_prev_dt.strftime('%d/%m/%Y') if hasattr(f_prev_dt, 'strftime') else str(f_prev_dt or '')
+        dias_retraso = max(0, (hoy - f_prev_dt.date()).days) if hasattr(f_prev_dt, 'date') else 0
+        estado_txt = "VENCIDO" if dias_retraso > 0 else "AL DÍA"
+
+        ws1.append([r[0], f"{r[1]} {r[2]}", r[3], r[4], r[5], r[6], f_pres, f_prev, dias_retraso, estado_txt])
+        if dias_retraso > 0:
+            for col in range(1, 11):
+                cell = ws1.cell(row=ws1.max_row, column=col)
+                cell.fill = mora_fill
+                cell.font = mora_font
+
+    for col_cells in ws1.columns:
+        max_len = max(len(str(cell.value or "")) for cell in col_cells)
+        ws1.column_dimensions[col_cells[0].column_letter].width = min(max_len + 4, 40)
+
+    # --- HOJA 2: RESUMEN INSTITUCIONAL ---
+    ws2 = wb.create_sheet(title="Resumen Inventario")
+    ws2.append(["RESUMEN POR CARRERA"])
+    ws2["A1"].font = Font(size=12, bold=True)
+    ws2.append(["Carrera", "Código", "Alumnos Registrados"])
+    for col in range(1, 4):
+        ws2.cell(row=2, column=col).fill = header_fill
+        ws2.cell(row=2, column=col).font = header_font
+
+    for cr in carreras_res:
+        ws2.append([cr[0], cr[1], cr[2]])
+
+    ws2.append([])
+    ws2.append(["ESTADO DE EJEMPLARES FÍSICOS"])
+    row_titulo = ws2.max_row
+    ws2.cell(row=row_titulo, column=1).font = Font(size=12, bold=True)
+    ws2.append(["Estado Físico", "Cantidad"])
+    row_hdr = ws2.max_row
+    for col in range(1, 3):
+        ws2.cell(row=row_hdr, column=col).fill = header_fill
+        ws2.cell(row=row_hdr, column=col).font = header_font
+
+    for inv in inventario_res:
+        ws2.append([inv[0], inv[1]])
+
+    for col_cells in ws2.columns:
+        max_len = max(len(str(cell.value or "")) for cell in col_cells)
+        ws2.column_dimensions[col_cells[0].column_letter].width = min(max_len + 4, 40)
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    nombre_archivo = f"Reporte_SIGEB_{ahora_peru().strftime('%Y%m%d_%H%M')}.xlsx"
+
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name=nombre_archivo,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
 # -------------------------------------------------------------

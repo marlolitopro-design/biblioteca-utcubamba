@@ -1095,6 +1095,9 @@ def crear_libro():
 
     archivo_pdf = pdf_subido or request.form.get('archivo_pdf_url', '').strip() or None
     portada = portada_subida or request.form.get('portada_url', '').strip() or None
+    if not portada:
+        flash('La imagen de portada es obligatoria para registrar un libro.', 'warning')
+        return redirect(url_for('listar_libros'))
     descripcion = request.form.get('descripcion', '').strip()
     carreras_seleccionadas = request.form.getlist('carreras')
 

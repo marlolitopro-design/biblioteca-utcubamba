@@ -515,5 +515,28 @@ const inputBuscador = document.getElementById('buscadorInventario');
             });
         });
     }
+
+    const inputBuscador = document.getElementById('buscadorInventario');
+    const btnLimpiar = document.getElementById('btnLimpiarBusqueda');
+    const filasTabla = document.querySelectorAll('#tablaInventarioLibros tbody tr');
+
+    if (inputBuscador) {
+        function filtrarInventario() {
+            const texto = inputBuscador.value.toLowerCase().trim();
+            btnLimpiar.style.display = texto ? 'inline-block' : 'none';
+            filasTabla.forEach(fila => {
+                if (fila.cells.length <= 1) return;
+                const contenido = fila.innerText.toLowerCase();
+                fila.style.display = contenido.includes(texto) ? '' : 'none';
+            });
+        }
+
+        inputBuscador.addEventListener('input', filtrarInventario);
+        btnLimpiar.addEventListener('click', function() {
+            inputBuscador.value = '';
+            filtrarInventario();
+            inputBuscador.focus();
+        });
+    }
 </script>
 {% endblock %}

@@ -325,14 +325,14 @@
                         </div>
                     </div>
 
-                    <div class="mb-3" id="campo_portada">
-                        <label class="form-label small fw-semibold text-secondary">Subir Foto de Carátula (obligatorio)</label>
-                        <input type="file" name="portada_file" accept="image/*" class="form-control form-control-sm mb-1">
-                        <input type="text" name="portada_url" class="form-control form-control-sm" placeholder="O escribe nombre/URL existente (ej. bovinos.png)">
+                    <div class="mb-3" id="campo_pdf" style="display: none;">
+                        <label class="form-label small fw-semibold text-secondary">Subir Archivo PDF</label>
+                        <input type="file" name="archivo_pdf_file" accept=".pdf" class="form-control form-control-sm mb-1">
+                        <input type="text" name="archivo_pdf_url" class="form-control form-control-sm" placeholder="O escribe nombre/URL existente (ej. manual.pdf)">
                     </div>
 
-                    <div class="mb-3" id="campo_portada" style="display: none;">
-                        <label class="form-label small fw-semibold text-secondary">Subir Foto de Carátula (opcional)</label>
+                    <div class="mb-3" id="campo_portada">
+                        <label class="form-label small fw-semibold text-secondary">Subir Foto de Carátula (obligatorio)</label>
                         <input type="file" name="portada_file" accept="image/*" class="form-control form-control-sm mb-1">
                         <input type="text" name="portada_url" class="form-control form-control-sm" placeholder="O escribe nombre/URL existente (ej. bovinos.png)">
                     </div>
@@ -443,29 +443,6 @@
         </div>
     </div>
 </div>
-
-const inputBuscador = document.getElementById('buscadorInventario');
-    const btnLimpiar = document.getElementById('btnLimpiarBusqueda');
-    const filasTabla = document.querySelectorAll('#tablaInventarioLibros tbody tr');
-
-    if (inputBuscador) {
-        function filtrarInventario() {
-            const texto = inputBuscador.value.toLowerCase().trim();
-            btnLimpiar.style.display = texto ? 'inline-block' : 'none';
-            filasTabla.forEach(fila => {
-                if (fila.cells.length <= 1) return;
-                const contenido = fila.innerText.toLowerCase();
-                fila.style.display = contenido.includes(texto) ? '' : 'none';
-            });
-        }
-
-        inputBuscador.addEventListener('input', filtrarInventario);
-        btnLimpiar.addEventListener('click', function() {
-            inputBuscador.value = '';
-            filtrarInventario();
-            inputBuscador.focus();
-        });
-    }
 
 <script>
     const selTipo = document.getElementById('select_tipo_recurso');

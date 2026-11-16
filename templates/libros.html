@@ -90,7 +90,7 @@
 <div class="card card-custom bg-white">
     <div class="card-body p-0">
         <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0" style="font-size: 0.9rem;">
+            <table id="tablaInventarioLibros" class="table table-hover align-middle mb-0" style="font-size: 0.9rem;">
                 <thead class="table-light">
                     <tr>
                         <th class="ps-4">Título y Autor</th>
@@ -443,6 +443,29 @@
         </div>
     </div>
 </div>
+
+const inputBuscador = document.getElementById('buscadorInventario');
+    const btnLimpiar = document.getElementById('btnLimpiarBusqueda');
+    const filasTabla = document.querySelectorAll('#tablaInventarioLibros tbody tr');
+
+    if (inputBuscador) {
+        function filtrarInventario() {
+            const texto = inputBuscador.value.toLowerCase().trim();
+            btnLimpiar.style.display = texto ? 'inline-block' : 'none';
+            filasTabla.forEach(fila => {
+                if (fila.cells.length <= 1) return;
+                const contenido = fila.innerText.toLowerCase();
+                fila.style.display = contenido.includes(texto) ? '' : 'none';
+            });
+        }
+
+        inputBuscador.addEventListener('input', filtrarInventario);
+        btnLimpiar.addEventListener('click', function() {
+            inputBuscador.value = '';
+            filtrarInventario();
+            inputBuscador.focus();
+        });
+    }
 
 <script>
     const selTipo = document.getElementById('select_tipo_recurso');

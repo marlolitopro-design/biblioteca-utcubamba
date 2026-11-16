@@ -310,10 +310,10 @@
                         </div>
                     </div>
 
-                    <div class="mb-3" id="campo_pdf" style="display: none;">
-                        <label class="form-label small fw-semibold text-secondary">Subir Archivo PDF</label>
-                        <input type="file" name="archivo_pdf_file" accept=".pdf" class="form-control form-control-sm mb-1">
-                        <input type="text" name="archivo_pdf_url" class="form-control form-control-sm" placeholder="O escribe nombre/URL existente (ej. manual.pdf)">
+                    <div class="mb-3" id="campo_portada">
+                        <label class="form-label small fw-semibold text-secondary">Subir Foto de Carátula (obligatorio)</label>
+                        <input type="file" name="portada_file" accept="image/*" class="form-control form-control-sm mb-1">
+                        <input type="text" name="portada_url" class="form-control form-control-sm" placeholder="O escribe nombre/URL existente (ej. bovinos.png)">
                     </div>
 
                     <div class="mb-3" id="campo_portada" style="display: none;">
@@ -432,25 +432,21 @@
 <script>
     const selTipo = document.getElementById('select_tipo_recurso');
     const campoPdf = document.getElementById('campo_pdf');
-    const campoPortada = document.getElementById('campo_portada');
 
     if (selTipo) {
         selTipo.addEventListener('change', function() {
             const esDigital = (this.value === 'DIGITAL' || this.value === 'HIBRIDO');
             campoPdf.style.display = esDigital ? 'block' : 'none';
-            campoPortada.style.display = esDigital ? 'block' : 'none';
         });
     }
 
     const selEditTipo = document.getElementById('edit_libro_tipo');
     const editCampoPdf = document.getElementById('edit_campo_pdf');
-    const editCampoPortada = document.getElementById('edit_campo_portada');
 
     if (selEditTipo) {
         selEditTipo.addEventListener('change', function() {
             const esDigital = (this.value === 'DIGITAL' || this.value === 'HIBRIDO');
             editCampoPdf.style.display = esDigital ? 'block' : 'none';
-            editCampoPortada.style.display = esDigital ? 'block' : 'none';
         });
     }
 
@@ -475,7 +471,6 @@
 
             const esDigital = (tipo === 'DIGITAL' || tipo === 'HIBRIDO');
             editCampoPdf.style.display = esDigital ? 'block' : 'none';
-            editCampoPortada.style.display = esDigital ? 'block' : 'none';
 
             document.querySelectorAll('.chk-edit-carrera').forEach(chk => {
                 chk.checked = carrerasArr.includes(chk.value);

@@ -1459,6 +1459,8 @@ def eliminar_libro(libro_id):
 
 @app.errorhandler(404)
 def pagina_no_encontrada(e):
+    if request.path == '/favicon.ico' or request.path.startswith('/static/'):
+        return '', 204
     flash('La página solicitada no existe.', 'warning')
     return redirect(url_for('catalogo'))
 

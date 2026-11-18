@@ -717,6 +717,61 @@ def exportar_reporte_pdf():
         mimetype="application/pdf"
     )
 
+@app.route('/admin/perfil', methods=['GET', 'POST'])
+def admin_perfil():
+    if not session.get('usuario') or session['usuario']['rol'] != 'ADMIN':
+        flash('Acceso restringido para el administrador.', 'warning')
+        return redirect(url_for('login'))
+
+    usuario_id = session['usuario']['id']
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    if request.method == 'POST':
+        actual = request.form.get('password_actual', '').strip()
+        nueva = request.form.get('password_nueva', '').strip()
+        confirmar = request.form.get('password_confirmar', '').strip()
+
+        cursor.execute("SELECT password_hash FROM Usuarios WHERE usuario_id = ?", (usuario_id,))
+        fila = cursor.fetchone()
+        stored = (fila[0] or '') if fila else ''
+
+        if stored.startswith(('pbkdf2:', 'scrypt:')):
+            actual_ok = check_password_hash(stored, actual)
+        else:
+            actual_ok = (stored == actual)
+
+        if not actual_ok:
+            flash('La contraseña actual ingresada es incorrecta.', 'danger')
+        elif nueva != confirmar:
+            flash('La nueva contraseña y la confirmación no coinciden.', 'warning')
+        elif len(nueva) < 6:
+            flash('La nueva contraseña debe tener al menos 6 caracteres.', 'warning')
+        else:
+            cursor.execute(
+                "UPDATE Usuarios SET password_hash = ? WHERE usuario_id = ?",
+                (generate_password_hash(nueva), usuario_id)
+            )
+            conn.commit()
+            flash('¡Contraseña del administrador actualizada con éxito!', 'success')
+
+    cursor.execute("""
+        SELECT dni, nombres, apellidos, rol, estado
+        FROM Usuarios
+        WHERE usuario_id = ?
+    """, (usuario_id,))
+    r = cursor.fetchone()
+    admin = {
+        'dni': r[0],
+        'nombres': r[1],
+        'apellidos': r[2],
+        'rol': r[3],
+        'estado': r[4]
+    }
+    conn.close()
+
+    return render_template('admin_perfil.html', admin=admin)
+
 # -------------------------------------------------------------
 # MOSTRADOR DEL ADMINISTRADOR
 # -------------------------------------------------------------

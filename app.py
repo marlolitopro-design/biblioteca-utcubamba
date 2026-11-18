@@ -10,6 +10,10 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from db import get_connection
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
+from reportlab.lib.pagesizes import letter, landscape
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'clave_secreta_institucional_utcubamba_2026')
@@ -624,6 +628,93 @@ def exportar_reporte_excel():
         as_attachment=True,
         download_name=nombre_archivo,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+@app.route('/admin/reporte/pdf')
+def exportar_reporte_pdf():
+    if not session.get('usuario') or session['usuario']['rol'] != 'ADMIN':
+        flash('Acceso restringido para el administrador.', 'warning')
+        return redirect(url_for('login'))
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT u.dni, u.nombres, u.apellidos, COALESCE(c.codigo, '-'), u.ciclo,
+               l.titulo, e.codigo_patrimonio, p.fecha_prestamo, p.fecha_devolucion_prevista
+        FROM Prestamos p
+        JOIN Usuarios u ON p.usuario_id = u.usuario_id
+        JOIN Ejemplares e ON p.ejemplar_id = e.ejemplar_id
+        JOIN Libros l ON e.libro_id = l.libro_id
+        LEFT JOIN Carreras c ON u.carrera_id = c.carrera_id
+        WHERE p.estado = 'ACTIVO'
+        ORDER BY p.fecha_devolucion_prevista ASC
+    """)
+    prestamos = cursor.fetchall()
+    conn.close()
+
+    output = BytesIO()
+    doc = SimpleDocTemplate(output, pagesize=landscape(letter), topMargin=36, bottomMargin=36, leftMargin=30, rightMargin=30)
+    styles = getSampleStyleSheet()
+    elementos = []
+
+    elementos.append(Paragraph("<b>IESTP UTCUBAMBA — REPORTE OFICIAL DE PRÉSTAMOS (SIGEB)</b>", styles['Title']))
+    elementos.append(Paragraph(f"Generado el: {ahora_peru().strftime('%d/%m/%Y %H:%M')} (Hora Perú) &nbsp;|&nbsp; Total activos: {len(prestamos)}", styles['Normal']))
+    elementos.append(Spacer(1, 14))
+
+    datos_tabla = [["DNI", "Estudiante", "Carrera", "Ciclo", "Libro", "Código", "Préstamo", "Vencimiento", "Estado"]]
+    estilos_tabla = [
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1E3A5F')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 9),
+        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
+        ('FONTSIZE', (0, 1), (-1, -1), 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+    ]
+
+    hoy = ahora_peru().date()
+    if not prestamos:
+        datos_tabla.append(["-", "No hay préstamos activos ni morosos en este momento.", "-", "-", "-", "-", "-", "-", "AL DÍA"])
+    else:
+        for idx, r in enumerate(prestamos, start=1):
+            f_pres = r[7].strftime('%d/%m/%Y') if hasattr(r[7], 'strftime') else str(r[7] or '')
+            f_prev_dt = r[8]
+            f_prev = f_prev_dt.strftime('%d/%m/%Y') if hasattr(f_prev_dt, 'strftime') else str(f_prev_dt or '')
+            dias_retraso = max(0, (hoy - f_prev_dt.date()).days) if hasattr(f_prev_dt, 'date') else 0
+            estado_txt = f"VENCIDO (+{dias_retraso}d)" if dias_retraso > 0 else "AL DÍA"
+
+            datos_tabla.append([
+                str(r[0]),
+                Paragraph(f"{r[1]} {r[2]}", styles['Normal']),
+                str(r[3]),
+                str(r[4]),
+                Paragraph(str(r[5]), styles['Normal']),
+                str(r[6]),
+                f_pres,
+                f_prev,
+                estado_txt
+            ])
+            if dias_retraso > 0:
+                estilos_tabla.append(('BACKGROUND', (0, idx), (-1, idx), colors.HexColor('#FDE2E1')))
+                estilos_tabla.append(('TEXTCOLOR', (-1, idx), (-1, idx), colors.HexColor('#9B1C1C')))
+
+    tabla = Table(datos_tabla, colWidths=[55, 130, 50, 35, 185, 75, 65, 65, 72])
+    tabla.setStyle(TableStyle(estilos_tabla))
+    elementos.append(tabla)
+
+    doc.build(elementos)
+    output.seek(0)
+    nombre_archivo = f"Reporte_SIGEB_{ahora_peru().strftime('%Y%m%d_%H%M')}.pdf"
+
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name=nombre_archivo,
+        mimetype="application/pdf"
     )
 
 # -------------------------------------------------------------

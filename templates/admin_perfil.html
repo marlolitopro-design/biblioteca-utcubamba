@@ -1,0 +1,68 @@
+{% extends 'base.html' %}
+
+{% block title %}Mi Perfil (Administrador) — IESTP Utcubamba{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="mb-4">
+            <h2 class="fw-bold text-dark mb-1">
+                <i class="bi bi-person-badge me-2 text-primary"></i>Perfil del Administrador
+            </h2>
+            <p class="text-muted mb-0">Información de tu cuenta de gestión y actualización segura de contraseña.</p>
+        </div>
+
+        <div class="row g-4">
+            <!-- Datos de la cuenta -->
+            <div class="col-md-5">
+                <div class="card card-custom bg-white p-4 h-100 border-top border-4 border-primary">
+                    <div class="text-center mb-3">
+                        <div class="bg-primary-subtle text-primary rounded-circle d-inline-flex align-items-center justify-content-center mb-2" style="width: 64px; height: 64px;">
+                            <i class="bi bi-shield-lock fs-2"></i>
+                        </div>
+                        <h5 class="fw-bold text-dark mb-0">{{ admin.nombres }} {{ admin.apellidos }}</h5>
+                        <span class="badge bg-warning text-dark mt-1">{{ admin.rol }}</span>
+                    </div>
+                    <hr>
+                    <div class="small">
+                        <div class="d-flex justify-content-between mb-2">
+                            <span class="text-muted">Usuario / DNI:</span>
+                            <strong class="text-dark font-monospace">{{ admin.dni }}</strong>
+                        </div>
+                        <div class="d-flex justify-content-between">
+                            <span class="text-muted">Estado:</span>
+                            <span class="badge bg-success">{{ admin.estado }}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Cambio de contraseña -->
+            <div class="col-md-7">
+                <div class="card card-custom bg-white p-4 h-100">
+                    <h5 class="fw-bold text-dark mb-3">
+                        <i class="bi bi-key me-2 text-warning"></i>Cambiar Contraseña
+                    </h5>
+                    <form method="POST" action="/admin/perfil">
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold text-secondary">Contraseña Actual</label>
+                            <input type="password" name="password_actual" class="form-control" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold text-secondary">Nueva Contraseña (mín. 6 caracteres)</label>
+                            <input type="password" name="password_nueva" class="form-control" minlength="6" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold text-secondary">Confirmar Nueva Contraseña</label>
+                            <input type="password" name="password_confirmar" class="form-control" minlength="6" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary fw-semibold w-100">
+                            <i class="bi bi-check-circle me-1"></i> Actualizar Contraseña
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
